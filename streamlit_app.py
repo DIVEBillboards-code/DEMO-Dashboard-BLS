@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
 from io import BytesIO
 
 st.set_page_config(page_title="Survey Visualizer", layout="wide")
 
-# Custom CSS
+# Custom CSS for better layout
 st.markdown("""
 <style>
     .main { padding: 2rem; }
@@ -19,229 +17,201 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Survey Data Visualizer")
-st.write("Upload your survey Excel file to generate tailored visualizations.")
+st.title("📊 Coca-Cola Survey Visualizer")
+st.write("Upload your survey Excel file to explore visualizations of the data.")
 
 uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
 
-# Simplified column type detection
-def get_numeric_columns(df):
-    return [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col]) and col != "User ID"]
+# Rename columns for simplicity and match your data
+column_mapping = {
+    "[Profiling] ¿Qué edad tienes?": "Age",
+    "[Profiling] Eres...": "Gender",
+    "[Ad recall] ¿Recuerda haber visto este anuncio en un cartel digital?": "Ad Recall",
+    "[Interest] ¿Te interesa este anuncio?": "Interest",
+    "[Attribution] Según tu opinión, este anuncio es para": "Attribution",
+    "[Brand image] Este es un anuncio de Coca Cola. ¿Qué imagen te da de Coca Cola?": "Brand Image",
+    "[Consideration] ¿En el futuro considerarías comprar Coca Cola?": "Consideration",
+    "¿Que tan seguido tomas Coca Cola?": "Frequency",
+    "Adjustment Weight": "Weight",
+    "User ID": "User ID",
+    "Area": "Area"
+}
 
-def get_categorical_columns(df):
-    return [col for col in df.columns if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_categorical_dtype(df[col])]
-
-# Define ordinal sequences
-ordinal_sequences = {
-    "Brand image": ["Muy negativa", "Negativa", "Neutra", "Positiva", "Muy positiva"],
+# Define ordinal orders
+ordinal_orders = {
+    "Brand Image": ["Muy negativa", "Negativa", "Neutra", "Positiva", "Muy positiva"],
     "Frequency": ["Nunca", "Una vez al mes", "Pocas veces al mes", "Una vez a la semana", "Varias veces a la semana"],
-    "Ad recall": ["No", "Sí, una vez", "Sí, varias veces"]
+    "Ad Recall": ["No", "Sí, una vez", "Sí, varias veces"],
+    "Interest": list(range(0, 11)),
+    "Consideration": list(range(0, 11))
 }
 
 if uploaded_file:
     try:
-        excel_file = pd.ExcelFile(uploaded_file)
-        sheet_names = excel_file.sheet_names
-        if not sheet_names:
-            st.error("No sheets found in the Excel file.")
-        else:
-            selected_sheet = st.selectbox("Select a sheet:", sheet_names)
-            df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+        df = pd.read_excel(uploaded_file)
+        
+        # Rename columns for easier handling
+        df = df.rename(columns=column_mapping)
+        st.write("### Data Preview")
+        st.dataframe(df.head())
 
-            # Debug: Show raw data
-            st.write("### Raw Data Preview")
-            st.dataframe(df.head())
+        # Convert ordinal columns to categorical with order
+        for col, order in ordinal_orders.items():
+            if col in df.columns:
+                df[col] = pd.Categorical(df[col], categories=order, ordered=True)
 
-            # Identify column types
-            numeric_cols = get_numeric_columns(df)
-            categorical_cols = get_categorical_columns(df)
-
-            # Debug: Display detected columns
-            st.write("### Detected Column Types")
-            st.write("Numeric Columns:", numeric_cols)
-            st.write("Categorical Columns:", categorical_cols)
-
-            # Handle ordinal variables
-            ordinal_cols = []
-            for col in numeric_cols[:]:  # Copy to avoid modifying list during iteration
-                series = df[col].dropna().astype(float)
-                is_ordinal = (series.apply(lambda x: x.is_integer()).all() and 
-                              series.min() >= 0 and series.max() <= 10 and series.nunique() <= 11)
-                if is_ordinal:
-                    df[col] = pd.Categorical(df[col], categories=range(0, 11), ordered=True)
-                    numeric_cols.remove(col)
-                    categorical_cols.append(col)
-                    ordinal_cols.append(col)
-
-            for col in categorical_cols[:]:
+        # Sidebar Filters
+        st.sidebar.header("Filters")
+        filters = {}
+        for col in ["Age", "Gender", "Ad Recall", "Attribution", "Area"]:
+            if col in df.columns:
                 unique_vals = df[col].dropna().unique()
-                for seq_name, seq in ordinal_sequences.items():
-                    if set(unique_vals).issubset(seq):
-                        df[col] = pd.Categorical(df[col], categories=seq, ordered=True)
-                        ordinal_cols.append(col)
-                        break
-
-            # Debug: Updated column types after ordinal handling
-            st.write("### Updated Column Types After Ordinal Detection")
-            st.write("Numeric Columns:", numeric_cols)
-            st.write("Categorical Columns:", categorical_cols)
-            st.write("Ordinal Columns:", ordinal_cols)
-
-            # Sidebar Filters
-            st.sidebar.header("Filters")
-            filter_cols = [col for col in df.columns if df[col].nunique() <= 20 and col != "User ID"]
-            filters = {}
-            for col in filter_cols:
-                unique_vals = df[col].dropna().unique()
-                selected_vals = st.sidebar.multiselect(f"Select {col}", unique_vals, default=unique_vals)
+                selected_vals = st.sidebar.multiselect(f"Filter {col}", unique_vals, default=unique_vals)
                 filters[col] = selected_vals
 
-            # Apply filters
-            filtered_df = df.copy()
-            for col, vals in filters.items():
-                filtered_df = filtered_df[filtered_df[col].isin(vals)]
+        # Apply filters
+        filtered_df = df.copy()
+        for col, vals in filters.items():
+            filtered_df = filtered_df[filtered_df[col].isin(vals)]
 
-            # Weight column selection
-            weight_col = st.sidebar.selectbox("Select weight column (optional):", 
-                                              ["None"] + list(df.columns), index=0)
+        # Weight option
+        weight_col = st.sidebar.selectbox("Apply weights (optional):", ["None", "Weight"], index=0)
 
-            # Data Overview
-            st.subheader("Data Overview")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Rows", filtered_df.shape[0])
-            col2.metric("Columns", filtered_df.shape[1])
-            col3.metric("Missing Values", filtered_df.isna().sum().sum())
-            with st.expander("View Filtered Data", expanded=False):
-                st.dataframe(filtered_df)
+        # Data Overview
+        st.subheader("Data Overview")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Rows", filtered_df.shape[0])
+        col2.metric("Columns", filtered_df.shape[1])
+        col3.metric("Missing Values", filtered_df.isna().sum().sum())
 
-            # Tabs
-            tab1, tab2, tab3, tab4 = st.tabs(["📈 Distribution", "🔄 Correlation", "📊 Categorical", "📅 Time Series"])
+        # Visualization Tabs
+        tab1, tab2, tab3 = st.tabs(["📊 Demographics", "📈 Perceptions", "🔄 Relationships"])
 
-            # Distribution Tab
-            with tab1:
-                st.subheader("Distribution Analysis")
-                all_cols = numeric_cols + categorical_cols
-                st.write("Available columns for distribution:", all_cols)
-                if all_cols:
-                    selected_col = st.selectbox("Select a column for distribution:", all_cols, key="dist_col")
-                    if selected_col in numeric_cols:
-                        st.write(f"Plotting histogram for numeric column: {selected_col}")
-                        fig_hist = px.histogram(filtered_df, x=selected_col, title=f"Histogram of {selected_col}")
-                        st.plotly_chart(fig_hist, use_container_width=True)
-                        fig_box = px.box(filtered_df, y=selected_col, title=f"Box Plot of {selected_col}")
-                        st.plotly_chart(fig_box, use_container_width=True)
-                    else:
-                        st.write(f"Plotting bar chart for categorical/ordinal column: {selected_col}")
-                        if weight_col != "None" and weight_col in filtered_df.columns:
-                            counts = filtered_df.groupby(selected_col, observed=True)[weight_col].sum().reset_index()
-                            counts.columns = [selected_col, "Weighted Count"]
-                        else:
-                            counts = filtered_df[selected_col].value_counts().reset_index()
-                            counts.columns = [selected_col, "Count"]
-                        if selected_col in ordinal_cols:
-                            order_key = [k for k, v in ordinal_sequences.items() if selected_col in k]
-                            if order_key:
-                                order = ordinal_sequences[order_key[0]]
-                                counts[selected_col] = pd.Categorical(counts[selected_col], categories=order, ordered=True)
-                                counts = counts.sort_values(selected_col)
-                        fig = px.bar(counts, x=selected_col, y=counts.columns[1], title=f"Distribution of {selected_col}")
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No columns available for distribution analysis.")
-
-            # Correlation Tab
-            with tab2:
-                st.subheader("Correlation Analysis")
-                ordinal_cat_cols = [col for col in categorical_cols if pd.api.types.is_categorical_dtype(df[col]) and df[col].cat.ordered]
-                corr_cols = numeric_cols + ordinal_cat_cols
-                st.write("Columns available for correlation:", corr_cols)
-                if len(corr_cols) >= 2:
-                    selected_corr_cols = st.multiselect("Select columns for correlation:", corr_cols, default=corr_cols[:min(5, len(corr_cols))])
-                    if len(selected_corr_cols) >= 2:
-                        corr_method = st.radio("Correlation method:", ["Pearson", "Spearman"])
-                        df_corr = filtered_df[selected_corr_cols].copy()
-                        for col in selected_corr_cols:
-                            if col in ordinal_cat_cols:
-                                df_corr[col] = filtered_df[col].cat.codes
-                        corr_matrix = df_corr.corr(method=corr_method.lower())
-                        fig, ax = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
-                        st.pyplot(fig)
-                    else:
-                        st.info("Select at least 2 columns for correlation.")
-                else:
-                    st.warning("Need at least 2 columns for correlation analysis.")
-
-            # Categorical Tab
-            with tab3:
-                st.subheader("Categorical Analysis")
-                st.write("Categorical columns available:", categorical_cols)
-                if categorical_cols:
-                    selected_cat_col = st.selectbox("Select a categorical column:", categorical_cols, key="cat_col")
-                    plot_type = st.radio("Plot type:", ["Bar", "Pie"])
+        # Demographics Tab
+        with tab1:
+            st.subheader("Demographics and Ad Recall")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Age Distribution
+                if "Age" in filtered_df.columns:
                     if weight_col != "None" and weight_col in filtered_df.columns:
-                        counts = filtered_df.groupby(selected_cat_col, observed=True)[weight_col].sum().reset_index()
-                        counts.columns = [selected_cat_col, "Weighted Count"]
+                        age_counts = filtered_df.groupby("Age", observed=True)[weight_col].sum().reset_index()
+                        age_counts.columns = ["Age", "Weighted Count"]
                     else:
-                        counts = filtered_df[selected_cat_col].value_counts().reset_index()
-                        counts.columns = [selected_cat_col, "Count"]
-                    if selected_cat_col in ordinal_cols:
-                        order_key = [k for k, v in ordinal_sequences.items() if selected_cat_col in k]
-                        if order_key:
-                            order = ordinal_sequences[order_key[0]]
-                            counts[selected_cat_col] = pd.Categorical(counts[selected_cat_col], categories=order, ordered=True)
-                            counts = counts.sort_values(selected_cat_col)
-                    if plot_type == "Bar":
-                        fig = px.bar(counts, x=selected_cat_col, y=counts.columns[1], title=f"{selected_cat_col}")
-                        st.plotly_chart(fig, use_container_width=True)
+                        age_counts = filtered_df["Age"].value_counts().reset_index()
+                        age_counts.columns = ["Age", "Count"]
+                    fig_age = px.bar(age_counts, x="Age", y=age_counts.columns[1], title="Age Distribution")
+                    st.plotly_chart(fig_age, use_container_width=True)
+                
+            with col2:
+                # Gender Distribution
+                if "Gender" in filtered_df.columns:
+                    if weight_col != "None" and weight_col in filtered_df.columns:
+                        gender_counts = filtered_df.groupby("Gender", observed=True)[weight_col].sum().reset_index()
+                        gender_counts.columns = ["Gender", "Weighted Count"]
                     else:
-                        fig = px.pie(counts, names=selected_cat_col, values=counts.columns[1], title=f"{selected_cat_col}")
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No categorical columns available.")
+                        gender_counts = filtered_df["Gender"].value_counts().reset_index()
+                        gender_counts.columns = ["Gender", "Count"]
+                    fig_gender = px.pie(gender_counts, names="Gender", values=gender_counts.columns[1], title="Gender Distribution")
+                    st.plotly_chart(fig_gender, use_container_width=True)
 
-            # Time Series Tab
-            with tab4:
-                st.subheader("Time Series Analysis")
-                st.info("No datetime columns detected in your data.")
-
-            # Download Options
-            st.subheader("Download Options")
-            download_format = st.radio("Select download format:", ["CSV", "Excel", "JSON"])
-            if st.button("Download Processed Data"):
-                if download_format == "CSV":
-                    csv = filtered_df.to_csv(index=False)
-                    b64 = BytesIO(csv.encode())
-                    st.download_button(label="Download CSV", data=b64, file_name=f"{selected_sheet}.csv", mime="text/csv")
-                elif download_format == "Excel":
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        filtered_df.to_excel(writer, sheet_name=selected_sheet, index=False)
-                    st.download_button(label="Download Excel", data=output, file_name=f"{selected_sheet}.xlsx", 
-                                      mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            # Ad Recall
+            if "Ad Recall" in filtered_df.columns:
+                if weight_col != "None" and weight_col in filtered_df.columns:
+                    recall_counts = filtered_df.groupby("Ad Recall", observed=True)[weight_col].sum().reset_index()
+                    recall_counts.columns = ["Ad Recall", "Weighted Count"]
                 else:
-                    json_str = filtered_df.to_json(orient='records')
-                    b64 = BytesIO(json_str.encode())
-                    st.download_button(label="Download JSON", data=b64, file_name=f"{selected_sheet}.json", mime="application/json")
+                    recall_counts = filtered_df["Ad Recall"].value_counts().reset_index()
+                    recall_counts.columns = ["Ad Recall", "Count"]
+                fig_recall = px.bar(recall_counts, x="Ad Recall", y=recall_counts.columns[1], title="Ad Recall Distribution")
+                st.plotly_chart(fig_recall, use_container_width=True)
+
+        # Perceptions Tab
+        with tab2:
+            st.subheader("Brand Perceptions and Behavior")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Interest Distribution
+                if "Interest" in filtered_df.columns:
+                    if weight_col != "None" and weight_col in filtered_df.columns:
+                        interest_counts = filtered_df.groupby("Interest", observed=True)[weight_col].sum().reset_index()
+                        interest_counts.columns = ["Interest", "Weighted Count"]
+                    else:
+                        interest_counts = filtered_df["Interest"].value_counts().reset_index()
+                        interest_counts.columns = ["Interest", "Count"]
+                    fig_interest = px.bar(interest_counts, x="Interest", y=interest_counts.columns[1], title="Interest in Ad (0-10)")
+                    st.plotly_chart(fig_interest, use_container_width=True)
+                
+                # Brand Image
+                if "Brand Image" in filtered_df.columns:
+                    if weight_col != "None" and weight_col in filtered_df.columns:
+                        image_counts = filtered_df.groupby("Brand Image", observed=True)[weight_col].sum().reset_index()
+                        image_counts.columns = ["Brand Image", "Weighted Count"]
+                    else:
+                        image_counts = filtered_df["Brand Image"].value_counts().reset_index()
+                        image_counts.columns = ["Brand Image", "Count"]
+                    fig_image = px.bar(image_counts, x="Brand Image", y=image_counts.columns[1], title="Brand Image Perception")
+                    st.plotly_chart(fig_image, use_container_width=True)
+
+            with col2:
+                # Consideration
+                if "Consideration" in filtered_df.columns:
+                    if weight_col != "None" and weight_col in filtered_df.columns:
+                        consid_counts = filtered_df.groupby("Consideration", observed=True)[weight_col].sum().reset_index()
+                        consid_counts.columns = ["Consideration", "Weighted Count"]
+                    else:
+                        consid_counts = filtered_df["Consideration"].value_counts().reset_index()
+                        consid_counts.columns = ["Consideration", "Count"]
+                    fig_consid = px.bar(consid_counts, x="Consideration", y=consid_counts.columns[1], title="Consideration to Buy (0-10)")
+                    st.plotly_chart(fig_consid, use_container_width=True)
+                
+                # Frequency
+                if "Frequency" in filtered_df.columns:
+                    if weight_col != "None" and weight_col in filtered_df.columns:
+                        freq_counts = filtered_df.groupby("Frequency", observed=True)[weight_col].sum().reset_index()
+                        freq_counts.columns = ["Frequency", "Weighted Count"]
+                    else:
+                        freq_counts = filtered_df["Frequency"].value_counts().reset_index()
+                        freq_counts.columns = ["Frequency", "Count"]
+                    fig_freq = px.bar(freq_counts, x="Frequency", y=freq_counts.columns[1], title="Consumption Frequency")
+                    st.plotly_chart(fig_freq, use_container_width=True)
+
+        # Relationships Tab
+        with tab3:
+            st.subheader("Relationships Between Variables")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Interest vs Consideration
+                if "Interest" in filtered_df.columns and "Consideration" in filtered_df.columns:
+                    fig_ic = px.scatter(filtered_df, x="Interest", y="Consideration", 
+                                      title="Interest vs Consideration", trendline="ols")
+                    st.plotly_chart(fig_ic, use_container_width=True)
+
+            with col2:
+                # Brand Image vs Frequency
+                if "Brand Image" in filtered_df.columns and "Frequency" in filtered_df.columns:
+                    fig_bf = px.box(filtered_df, x="Brand Image", y="Frequency", 
+                                   title="Brand Image vs Consumption Frequency")
+                    st.plotly_chart(fig_bf, use_container_width=True)
+
+        # Download Option
+        st.subheader("Download Data")
+        if st.button("Download as CSV"):
+            csv = filtered_df.to_csv(index=False)
+            st.download_button(label="Download CSV", data=csv, file_name="survey_data.csv", mime="text/csv")
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error processing file: {e}")
 else:
-    st.info("👈 Upload an Excel file to begin.")
-    st.subheader("Sample Visualizations:")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Distribution**")
-        st.image("https://via.placeholder.com/400x300?text=Histogram+and+Bar+Charts", use_column_width=True)
-    with col2:
-        st.markdown("**Categorical**")
-        st.image("https://via.placeholder.com/400x300?text=Pie+and+Bar+Charts", use_column_width=True)
+    st.info("👈 Please upload your Excel file to see visualizations.")
     st.markdown("""
-    ### How to use:
-    1. Upload your survey Excel file
-    2. Apply filters and select weights
-    3. Explore visualizations
-    4. Download your data
+    ### Expected Visualizations:
+    - **Demographics**: Age, Gender, Ad Recall distributions
+    - **Perceptions**: Interest, Brand Image, Consideration, and Frequency
+    - **Relationships**: Interest vs Consideration, Brand Image vs Frequency
     """)
 
-st.markdown("---\nCreated with Streamlit • Survey Visualizer App")
+st.markdown("---\nCreated with Streamlit • Coca-Cola Survey Visualizer")
