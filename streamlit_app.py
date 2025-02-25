@@ -1,16 +1,15 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import scipy.stats as stats
+import plotly.graph_objects as go
 from io import BytesIO
 from fpdf import FPDF
 import plotly.io as pio
 import os
 
-# Page configuration
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
-# Custom CSS for better UX
+# Custom CSS
 st.markdown("""
 <style>
     .main { padding: 2rem; background-color: #f9f9f9; }
@@ -28,14 +27,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Title and description
 st.title("📊 Excel Data Visualizer")
-st.write("Explore your data with interactive visualizations and statistical insights!")
+st.write("Explore your data with interactive visualizations!")
 
-# File uploader
 uploaded_file = st.file_uploader("Upload your Excel file here", type=["xlsx", "xls"], help="Supports .xlsx and .xls formats.")
 
-# Function to detect column types
 def detect_survey_columns(df):
     numeric_cols = []
     categorical_cols = []
@@ -79,7 +75,6 @@ def detect_survey_columns(df):
 
     return numeric_cols, categorical_cols, ordinal_cols
 
-# Function to create PDF report
 def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -136,14 +131,12 @@ def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figure
     pdf_output.seek(0)
     return pdf_output
 
-# Main app logic
 if uploaded_file:
     with st.spinner("Processing your file..."):
         try:
             df = pd.read_excel(uploaded_file)
             st.success("File uploaded successfully!")
 
-            # Sidebar controls
             with st.sidebar:
                 st.header("Controls")
                 with st.expander("Filters", expanded=True):
@@ -161,7 +154,6 @@ if uploaded_file:
                 weight_col = st.selectbox("Apply weights (optional)", weight_options, index=0, 
                                         help="Choose a numeric column to weight the data.")
 
-            # Apply filters
             filtered_df = df.copy()
             for col, vals in filters.items():
                 filtered_df = filtered_df[filtered_df[col].isin(vals)]
@@ -169,7 +161,6 @@ if uploaded_file:
                 st.warning("Filters resulted in no data. Showing full dataset instead.")
                 filtered_df = df.copy()
 
-            # Data overview
             st.subheader("Data Overview", anchor="overview")
             col1, col2, col3 = st.columns(3)
             col1.metric("Rows", filtered_df.shape[0])
@@ -183,107 +174,154 @@ if uploaded_file:
                 st.write(f"**Categorical (Unordered):** {categorical_cols}")
                 st.write(f"**Ordinal (Survey-like):** {ordinal_cols}")
 
-            # Dictionary to store figures for PDF
+            # Store figures for PDF
             figures = {}
 
-            # Tabs
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles", "📉 Stats"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles"])
 
-            # Placeholder for existing tabs (replace with your visualizations)
             with tab1:
                 st.subheader("Overview")
-                # Example: Add your pie charts, bar charts, etc.
-                pass
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    if categorical_cols:
+                        cat_col = st.selectbox("Categorical Data", categorical_cols, key="cat_overview")
+                        counts = filtered_df[cat_col].value_counts().reset_index()
+                        counts.columns = [cat_col, "Count"]
+                        fig_pie = px.pie(counts, names=cat_col, values="Count", title=f"{cat_col} Breakdown",
+                                       template="plotly_white", color_discrete_sequence=px.colors.qualitative.Pastel)
+                        fig_pie.update_layout(font=dict(size=12))
+                        st.plotly_chart(fig_pie, use_container_width=True, key="overview_pie_chart")
+                        figures["Overview Pie Chart"] = fig_pie
+                    else:
+                        st.info("No categorical columns available.")
+
+                with col2:
+                    survey_cols = ordinal_cols + categorical_cols
+                    if survey_cols:
+                        survey_col = st.selectbox("Survey Responses", survey_cols, key="survey_overview")
+                        if weight_col != "None" and weight_col in filtered_df.columns:
+                            counts = filtered_df.groupby(survey_col, observed=True)[weight_col].sum().reset_index()
+                            counts.columns = [survey_col, "Weighted Count"]
+                        else:
+                            counts = filtered_df[survey_col].value_counts().reset_index()
+                            counts.columns = [survey_col, "Count"]
+                        if survey_col in ordinal_cols and filtered_df[survey_col].dtype.name == "category":
+                            counts[survey_col] = pd.Categorical(counts[survey_col], 
+                                                              categories=filtered_df[survey_col].cat.categories, ordered=True)
+                            counts = counts.sort_values(survey_col)
+                        fig_bar = px.bar(counts, x=survey_col, y=counts.columns[1], title=f"{survey_col}",
+                                       template="plotly_white", color_discrete_sequence=["#00cc96"])
+                        fig_bar.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_bar, use_container_width=True, key="overview_bar_chart")
+                        figures["Overview Bar Chart"] = fig_bar
+                    else:
+                        st.info("No survey-like columns available.")
 
             with tab2:
                 st.subheader("Insights")
-                # Example: Add your bar charts, heatmaps, etc.
-                pass
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    survey_cols = ordinal_cols + categorical_cols
+                    if survey_cols and numeric_cols:
+                        survey_x = st.selectbox("Survey Question (X)", survey_cols, key="comp_survey")
+                        num_y = st.selectbox("Numeric (Y)", numeric_cols, key="comp_num")
+                        fig_box = px.box(filtered_df, x=survey_x, y=num_y, title=f"{num_y} by {survey_x}",
+                                       template="plotly_white", color_discrete_sequence=["#ff5733"])
+                        fig_box.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_box, use_container_width=True, key="insights_box_chart")
+                        figures["Insights Box Plot"] = fig_box
+                    else:
+                        st.info("Need survey and numeric columns for insights.")
+
+                with col2:
+                    if len(survey_cols) >= 2:
+                        survey_x2 = st.selectbox("Survey Question (X-axis)", survey_cols, key="comp_survey_x")
+                        survey_y2 = st.selectbox("Survey Question (Y-axis)", 
+                                               [col for col in survey_cols if col != survey_x2], key="comp_survey_y")
+                        cross_tab = pd.crosstab(filtered_df[survey_x2], filtered_df[survey_y2])
+                        fig_heatmap = px.imshow(cross_tab, text_auto=True, aspect="auto",
+                                              title=f"{survey_x2} vs {survey_y2}", 
+                                              color_continuous_scale="Blues", template="plotly_white")
+                        fig_heatmap.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_heatmap, use_container_width=True, key="insights_heatmap_chart")
+                        figures["Insights Heatmap"] = fig_heatmap
+                    else:
+                        st.info("Need at least two survey columns for heatmap.")
 
             with tab3:
-                st.subheader("Explore")
-                # Example: Add your box plots, scatter plots, etc.
-                pass
+                st.subheader("Explore Relationships")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    if numeric_cols:
+                        num_col = st.selectbox("Numeric Data", numeric_cols, key="num_explore")
+                        fig_hist = px.histogram(filtered_df, x=num_col, title=f"{num_col} Distribution",
+                                              template="plotly_white", color_discrete_sequence=["#0078d4"],
+                                              nbins=min(50, filtered_df[num_col].nunique()))
+                        fig_hist.update_layout(font=dict(size=12))
+                        st.plotly_chart(fig_hist, use_container_width=True, key="explore_hist_chart")
+                        figures["Explore Histogram"] = fig_hist
+                    else:
+                        st.info("No numeric columns available.")
+
+                with col2:
+                    survey_cols = ordinal_cols + categorical_cols
+                    if survey_cols and (numeric_cols or len(survey_cols) >= 2):
+                        survey_x = st.selectbox("Survey Question", survey_cols, key="rel_survey_x")
+                        y_options = numeric_cols + [col for col in survey_cols if col != survey_x]
+                        y_col = st.selectbox("Y-Axis (Numeric or Survey)", y_options, key="rel_y")
+                        if y_col in numeric_cols:
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{num_y} by {survey_x}",
+                                           template="plotly_white", color_discrete_sequence=["#ab63fa"])
+                        else:
+                            y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_data, 
+                                           title=f"{y_col} {'(codes)' if y_col in ordinal_cols else ''} by {survey_x}",
+                                           template="plotly_white", color_discrete_sequence=["#ab63fa"])
+                        fig_rel.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_rel, use_container_width=True, key="explore_box_chart")
+                        figures["Explore Box Plot"] = fig_rel
+                    else:
+                        st.info("Need survey and numeric/survey columns.")
 
             with tab4:
                 st.subheader("Profiles")
-                # Example: Add your radar charts, etc.
-                pass
+                survey_cols = numeric_cols + ordinal_cols
+                if len(survey_cols) >= 2 and categorical_cols:
+                    group_col = st.selectbox("Group By", categorical_cols, key="radar_group")
+                    radar_cols = st.multiselect("Select Variables (2+)", survey_cols, 
+                                              default=survey_cols[:min(3, len(survey_cols))], 
+                                              key="radar_vars")
+                    if len(radar_cols) >= 2:
+                        radar_df = filtered_df.copy()
+                        for col in radar_cols:
+                            if col in ordinal_cols and radar_df[col].dtype.name == "category":
+                                radar_df[col] = radar_df[col].cat.codes
+                        agg_data = radar_df.groupby(group_col)[radar_cols].mean().reset_index()
+                        fig_radar = go.Figure()
+                        for i, row in agg_data.iterrows():
+                            values = [row[col] for col in radar_cols]
+                            fig_radar.add_trace(go.Scatterpolar(
+                                r=values + [values[0]],
+                                theta=radar_cols + [radar_cols[0]],
+                                fill='toself',
+                                name=row[group_col],
+                                line=dict(color=px.colors.qualitative.Pastel[i % len(px.colors.qualitative.Pastel)])
+                            ))
+                        max_val = agg_data[radar_cols].max().max()
+                        fig_radar.update_layout(
+                            polar=dict(radialaxis=dict(visible=True, range=[0, max(10, max_val)])),
+                            showlegend=True, template="plotly_white", font=dict(size=12)
+                        )
+                        st.plotly_chart(fig_radar, use_container_width=True, key="profiles_radar_chart")
+                        figures["Profiles Radar Chart"] = fig_radar
+                    else:
+                        st.info("Select at least 2 numeric or ordinal variables for radar chart.")
+                else:
+                    st.info("Need at least 2 numeric/ordinal columns and 1 categorical column for radar charts.")
 
-            # Stats Tab
-            with tab5:
-                st.subheader("Statistical Insights")
-
-                # Correlation Matrix
-                with st.expander("Correlation Matrix", expanded=False):
-                    st.write("**Correlation Matrix**: Visualizes the strength and direction of relationships between numeric variables. Values range from -1 (strong negative) to 1 (strong positive).")
-                    numeric_cols_selected = st.multiselect("Select numeric columns for correlation", numeric_cols, default=numeric_cols, key="corr_cols")
-                    if st.button("Generate Correlation Matrix", key="corr_button"):
-                        if len(numeric_cols_selected) < 2:
-                            st.warning("Please select at least two numeric columns.")
-                        else:
-                            corr_matrix = filtered_df[numeric_cols_selected].corr()
-                            fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", 
-                                                 title="Correlation Matrix", color_continuous_scale="RdBu", 
-                                                 template="plotly_white")
-                            st.plotly_chart(fig_corr, use_container_width=True)
-                            figures["Correlation Matrix"] = fig_corr
-
-                # Summary Statistics
-                with st.expander("Summary Statistics", expanded=False):
-                    st.write("**Summary Statistics**: Provides key metrics like mean, median, and standard deviation for selected columns.")
-                    summary_cols = st.multiselect("Select columns for summary statistics", 
-                                                  numeric_cols + categorical_cols + ordinal_cols, 
-                                                  default=numeric_cols, key="summary_cols")
-                    if st.button("Generate Summary Statistics", key="summary_button"):
-                        if not summary_cols:
-                            st.warning("Please select at least one column.")
-                        else:
-                            summary = filtered_df[summary_cols].describe(include='all')
-                            st.dataframe(summary)
-
-                # Statistical Tests
-                with st.expander("Statistical Tests", expanded=False):
-                    st.write("Perform basic statistical tests to uncover relationships in your data.")
-
-                    # Chi-square Test
-                    st.write("**Chi-square Test**: Determines if there is a significant association between two categorical variables.")
-                    cat_col1 = st.selectbox("Select first categorical column", categorical_cols, key="chi_cat1")
-                    cat_col2 = st.selectbox("Select second categorical column", 
-                                            [col for col in categorical_cols if col != cat_col1], key="chi_cat2")
-                    if st.button("Run Chi-square Test", key="chi_button"):
-                        if cat_col1 and cat_col2:
-                            contingency_table = pd.crosstab(filtered_df[cat_col1], filtered_df[cat_col2])
-                            chi2, p, dof, expected = stats.chi2_contingency(contingency_table)
-                            st.write(f"Chi-square statistic: {chi2:.2f}")
-                            st.write(f"P-value: {p:.4f}")
-                            if p < 0.05:
-                                st.write("Interpretation: There is a significant association between the two variables (p < 0.05).")
-                            else:
-                                st.write("Interpretation: There is no significant association between the two variables (p >= 0.05).")
-                        else:
-                            st.warning("Please select two categorical columns.")
-
-                    # T-test
-                    st.write("**T-test**: Compares the means of a numeric variable between two groups to see if they are significantly different.")
-                    numeric_col = st.selectbox("Select numeric column", numeric_cols, key="ttest_num")
-                    group_col = st.selectbox("Select categorical column with two groups", 
-                                             [col for col in categorical_cols if filtered_df[col].nunique() == 2], key="ttest_group")
-                    if st.button("Run T-test", key="ttest_button"):
-                        if numeric_col and group_col:
-                            group1 = filtered_df[filtered_df[group_col] == filtered_df[group_col].unique()[0]][numeric_col]
-                            group2 = filtered_df[filtered_df[group_col] == filtered_df[group_col].unique()[1]][numeric_col]
-                            t_stat, p_val = stats.ttest_ind(group1, group2, equal_var=False)  # Welch's t-test
-                            st.write(f"T-statistic: {t_stat:.2f}")
-                            st.write(f"P-value: {p_val:.4f}")
-                            if p_val < 0.05:
-                                st.write("Interpretation: There is a significant difference in means between the two groups (p < 0.05).")
-                            else:
-                                st.write("Interpretation: There is no significant difference in means between the two groups (p >= 0.05).")
-                        else:
-                            st.warning("Please select a numeric column and a categorical column with exactly two unique values.")
-
-            # Download Section
             st.subheader("Download Your Data")
             col1, col2 = st.columns(2)
             with col1:
@@ -309,9 +347,7 @@ else:
           - **Insights**: Comparisons and heatmaps.
           - **Explore**: Relationships and histograms.
           - **Profiles**: Radar charts for multi-variable analysis.
-          - **Stats**: Statistical insights like correlation, summary stats, and tests.
         - **Download**: Save as CSV or PDF with graphs!
         """)
 
-# Footer
 st.markdown("---\nCreated with ❤️ for DIVE")
