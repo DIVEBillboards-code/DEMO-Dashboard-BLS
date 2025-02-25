@@ -6,4 +6,4 @@ plotly
 openpyxl
 xlsxwriter
 statsmodels
-FPDF: 1.7.2
+fpdf
