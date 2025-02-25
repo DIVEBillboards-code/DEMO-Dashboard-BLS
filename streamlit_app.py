@@ -23,51 +23,43 @@ st.write("Upload any Excel file to detect and visualize survey-like questions.")
 uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
 
 def detect_survey_columns(df):
-    """Detect numeric, categorical, and ordinal columns with refined heuristics."""
+    """Detect numeric, categorical, and ordinal columns."""
     numeric_cols = []
     categorical_cols = []
     ordinal_cols = []
 
     for col in df.columns:
-        # Skip likely ID columns
         if "id" in col.lower() or df[col].nunique() > 0.5 * len(df):
             continue
 
-        # Numeric columns
         if pd.api.types.is_numeric_dtype(df[col]):
             series = df[col].dropna().astype(float)
-            # Continuous: >20 unique values and not all integers
             if series.nunique() > 20 and not series.apply(lambda x: x.is_integer()).all():
                 numeric_cols.append(col)
-            # Ordinal: Integer scale (e.g., 0-10) or <=10 unique values
             elif series.nunique() <= 10 or (series.min() >= 0 and series.max() <= 10 and series.apply(lambda x: x.is_integer()).all()):
                 df[col] = pd.Categorical(df[col], categories=sorted(series.unique()), ordered=True)
                 ordinal_cols.append(col)
             else:
                 numeric_cols.append(col)
 
-        # Categorical columns
         elif pd.api.types.is_object_dtype(df[col]):
             unique_vals = df[col].nunique()
             sample_vals = df[col].dropna().unique()
-            # Ordinal: <=10 unique values with order indicators
             ordinal_indicators = ["muy", "negativa", "positiva", "nunca", "siempre", "frecuente", "low", "medium", "high", "yes", "no"]
             if unique_vals <= 10 and any(ind.lower() in " ".join(str(val).lower() for val in sample_vals) for ind in ordinal_indicators):
                 df[col] = pd.Categorical(df[col], categories=sample_vals, ordered=True)
                 ordinal_cols.append(col)
-            # Categorical: Any other text column
             else:
                 categorical_cols.append(col)
 
-    # Manual override: Ensure '[Brand image]' is ordinal if present
+    # Manual overrides
     brand_image_col = '[Brand image] This is an advertisement for Cetaphil. What image does it give you of Cetaphil?'
     if brand_image_col in categorical_cols:
         categorical_cols.remove(brand_image_col)
         ordinal_cols.append(brand_image_col)
         df[brand_image_col] = pd.Categorical(df[brand_image_col], 
-                                            categories=["Negative", "Neutral", "Positive"], ordered=True)  # Adjust categories as needed
+                                            categories=["Negative", "Neutral", "Positive"], ordered=True)  # Adjust if needed
 
-    # Move '[Attribution]' to categorical if misclassified
     attribution_col = '[Attribution] In your opinion, this ad is for:'
     if attribution_col in ordinal_cols:
         ordinal_cols.remove(attribution_col)
@@ -103,7 +95,10 @@ if uploaded_file:
             filtered_df = filtered_df[filtered_df[col].isin(vals)]
         if filtered_df.empty:
             st.warning("Filters resulted in no data. Showing full dataset instead.")
-            filtered_df = df.copy()  # Fall back to full data
+            filtered_df = df.copy()
+
+        st.write("### Filtered Data Preview (First 5 Rows)")
+        st.dataframe(filtered_df.head())
 
         # Weight column selection
         weight_options = ["None"] + numeric_cols
@@ -127,6 +122,7 @@ if uploaded_file:
             with col1:
                 if numeric_cols:
                     num_col = st.selectbox("Select a numeric column:", numeric_cols, key="num_dist")
+                    st.write(f"Plotting histogram for {num_col} with {len(filtered_df[num_col].dropna())} values")
                     fig_num = px.histogram(filtered_df, x=num_col, title=f"Distribution of {num_col}", 
                                          nbins=min(50, filtered_df[num_col].nunique()))
                     st.plotly_chart(fig_num, use_container_width=True, key="dist_num_chart")
@@ -143,6 +139,7 @@ if uploaded_file:
                     else:
                         counts = filtered_df[survey_col].value_counts().reset_index()
                         counts.columns = [survey_col, "Count"]
+                    st.write(f"Plotting bar chart for {survey_col} with {len(counts)} categories")
                     if survey_col in ordinal_cols and filtered_df[survey_col].dtype.name == "category":
                         counts[survey_col] = pd.Categorical(counts[survey_col], 
                                                           categories=filtered_df[survey_col].cat.categories, ordered=True)
@@ -162,6 +159,7 @@ if uploaded_file:
                 if survey_cols and numeric_cols:
                     survey_x = st.selectbox("Select survey question (X):", survey_cols, key="comp_survey")
                     num_y = st.selectbox("Select numeric (Y):", numeric_cols, key="comp_num")
+                    st.write(f"Plotting box plot for {survey_x} vs {num_y}")
                     fig_comp = px.box(filtered_df, x=survey_x, y=num_y, title=f"{num_y} by {survey_x}")
                     st.plotly_chart(fig_comp, use_container_width=True, key="comp_num_chart")
                 else:
@@ -178,6 +176,7 @@ if uploaded_file:
                     else:
                         cross_tab = pd.crosstab(filtered_df[survey_x2], filtered_df[survey_y2]).reset_index()
                         cross_tab = cross_tab.melt(id_vars=[survey_x2], var_name=survey_y2, value_name="Count")
+                    st.write(f"Plotting grouped bar for {survey_x2} vs {survey_y2}")
                     fig_cross = px.bar(cross_tab, x=survey_x2, y="Count", color=survey_y2, 
                                       title=f"{survey_x2} vs {survey_y2}", barmode="group")
                     st.plotly_chart(fig_cross, use_container_width=True, key="comp_cross_chart")
@@ -193,6 +192,7 @@ if uploaded_file:
                 if len(numeric_cols) >= 2:
                     num_x = st.selectbox("Select numeric (X):", numeric_cols, key="rel_num_x")
                     num_y = st.selectbox("Select numeric (Y):", [col for col in numeric_cols if col != num_x], key="rel_num_y")
+                    st.write(f"Plotting scatter for {num_x} vs {num_y}")
                     fig_scatter = px.scatter(filtered_df, x=num_x, y=num_y, title=f"{num_x} vs {num_y}", trendline="ols")
                     st.plotly_chart(fig_scatter, use_container_width=True, key="rel_scatter_chart")
                 else:
@@ -210,6 +210,7 @@ if uploaded_file:
                         y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
                         fig_rel = px.box(filtered_df, x=survey_x, y=y_data, 
                                        title=f"{y_col} {'(codes)' if y_col in ordinal_cols else ''} by {survey_x}")
+                    st.write(f"Plotting box for {survey_x} vs {y_col}")
                     st.plotly_chart(fig_rel, use_container_width=True, key="rel_box_chart")
                 else:
                     st.info("Need survey-like and numeric/survey columns for relationship analysis.")
