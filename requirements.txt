@@ -1,1 +1,8 @@
 streamlit
+pandas
+matplotlib
+seaborn
+plotly
+openpyxl
+xlsxwriter
+statsmodels
