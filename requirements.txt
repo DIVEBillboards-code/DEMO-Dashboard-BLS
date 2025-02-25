@@ -7,3 +7,4 @@ openpyxl
 xlsxwriter
 statsmodels
 fpdf
+kaleido
