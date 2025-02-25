@@ -6,7 +6,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
-# Enhanced CSS
+# Custom CSS
 st.markdown("""
 <style>
     .main { padding: 2rem; background-color: #f9f9f9; }
@@ -117,7 +117,6 @@ if uploaded_file:
 
             tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles"])
 
-            # Overview Tab
             with tab1:
                 st.subheader("Overview")
                 col1, col2 = st.columns(2)
@@ -155,7 +154,6 @@ if uploaded_file:
                     else:
                         st.info("No survey-like columns available.")
 
-            # Insights Tab
             with tab2:
                 st.subheader("Insights")
                 col1, col2 = st.columns(2)
@@ -186,7 +184,6 @@ if uploaded_file:
                     else:
                         st.info("Need at least two survey columns for heatmap.")
 
-            # Explore Tab
             with tab3:
                 st.subheader("Explore Relationships")
                 col1, col2 = st.columns(2)
@@ -221,20 +218,24 @@ if uploaded_file:
                     else:
                         st.info("Need survey and numeric/survey columns.")
 
-            # Profiles Tab (Radar Charts)
             with tab4:
                 st.subheader("Profiles")
-                survey_cols = ordinal_cols + [col for col in numeric_cols if col != weight_col]
-                if len(survey_cols) >= 2:
+                survey_cols = numeric_cols + ordinal_cols  # Only numeric or ordinal for radar
+                if len(survey_cols) >= 2 and categorical_cols:
                     group_col = st.selectbox("Group By", categorical_cols, key="radar_group")
-                    radar_cols = st.multiselect("Select Variables (2+)", survey_cols, default=survey_cols[:min(3, len(survey_cols))], 
+                    radar_cols = st.multiselect("Select Variables (2+)", survey_cols, 
+                                              default=survey_cols[:min(3, len(survey_cols))], 
                                               key="radar_vars")
                     if len(radar_cols) >= 2:
-                        # Aggregate data
-                        agg_data = filtered_df.groupby(group_col)[radar_cols].mean().reset_index()
+                        # Convert ordinal to numeric codes for aggregation
+                        radar_df = filtered_df.copy()
+                        for col in radar_cols:
+                            if col in ordinal_cols and radar_df[col].dtype.name == "category":
+                                radar_df[col] = radar_df[col].cat.codes
+                        agg_data = radar_df.groupby(group_col)[radar_cols].mean().reset_index()
                         fig_radar = go.Figure()
                         for i, row in agg_data.iterrows():
-                            values = [row[col] if col in numeric_cols else row[col].cat.codes for col in radar_cols]
+                            values = [row[col] for col in radar_cols]
                             fig_radar.add_trace(go.Scatterpolar(
                                 r=values + [values[0]],  # Close the loop
                                 theta=radar_cols + [radar_cols[0]],
@@ -242,17 +243,17 @@ if uploaded_file:
                                 name=row[group_col],
                                 line=dict(color=px.colors.qualitative.Pastel[i % len(px.colors.qualitative.Pastel)])
                             ))
+                        max_val = agg_data[radar_cols].max().max()
                         fig_radar.update_layout(
-                            polar=dict(radialaxis=dict(visible=True, range=[0, max(10, agg_data[radar_cols].max().max())])),
+                            polar=dict(radialaxis=dict(visible=True, range=[0, max(10, max_val)])),
                             showlegend=True, template="plotly_white", font=dict(size=12)
                         )
                         st.plotly_chart(fig_radar, use_container_width=True, key="profiles_radar_chart")
                     else:
-                        st.info("Select at least 2 variables for radar chart.")
+                        st.info("Select at least 2 numeric or ordinal variables for radar chart.")
                 else:
-                    st.info("Need at least 2 survey/numeric columns for radar charts.")
+                    st.info("Need at least 2 numeric/ordinal columns and 1 categorical column for radar charts.")
 
-            # Download
             st.subheader("Download Your Data")
             if st.button("Download as CSV", help="Save the filtered data as a CSV file"):
                 csv = filtered_df.to_csv(index=False)
