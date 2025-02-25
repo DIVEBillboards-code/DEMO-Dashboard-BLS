@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
+from fpdf import FPDF
+import plotly.io as pio
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
@@ -71,6 +73,55 @@ def detect_survey_columns(df):
         categorical_cols.append(attribution_col)
 
     return numeric_cols, categorical_cols, ordinal_cols
+
+def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Excel Data Visualizer Report", ln=True, align="C")
+
+    # Data Overview
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Data Overview", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 6, f"Rows: {filtered_df.shape[0]}", ln=True)
+    pdf.cell(0, 6, f"Columns: {filtered_df.shape[1]}", ln=True)
+    pdf.cell(0, 6, f"Missing Values: {filtered_df.isna().sum().sum()}", ln=True)
+
+    # Column Types
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Column Types", ln=True)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 6, f"Numeric (Continuous): {', '.join(numeric_cols)}", ln=True)
+    pdf.cell(0, 6, f"Categorical (Unordered): {', '.join(categorical_cols)}", ln=True)
+    pdf.cell(0, 6, f"Ordinal (Survey-like): {', '.join(ordinal_cols)}", ln=True)
+
+    # Data Table
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Filtered Data Preview", ln=True)
+    pdf.set_font("Arial", "", 8)
+    col_width = pdf.w / (len(filtered_df.columns) + 1)  # Adjust width based on number of columns
+    row_height = 6
+
+    # Header
+    for col in filtered_df.columns:
+        pdf.cell(col_width, row_height, str(col), border=1)
+    pdf.ln(row_height)
+
+    # Data (first 10 rows)
+    for i, row in filtered_df.head(10).iterrows():
+        for value in row:
+            pdf.cell(col_width, row_height, str(value)[:20], border=1)  # Truncate long text
+        pdf.ln(row_height)
+
+    # Output to BytesIO
+    pdf_output = BytesIO()
+    pdf_output.write(pdf.output(dest='S').encode('latin1'))
+    pdf_output.seek(0)
+    return pdf_output
 
 if uploaded_file:
     with st.spinner("Processing your file..."):
@@ -220,14 +271,13 @@ if uploaded_file:
 
             with tab4:
                 st.subheader("Profiles")
-                survey_cols = numeric_cols + ordinal_cols  # Only numeric or ordinal for radar
+                survey_cols = numeric_cols + ordinal_cols
                 if len(survey_cols) >= 2 and categorical_cols:
                     group_col = st.selectbox("Group By", categorical_cols, key="radar_group")
                     radar_cols = st.multiselect("Select Variables (2+)", survey_cols, 
                                               default=survey_cols[:min(3, len(survey_cols))], 
                                               key="radar_vars")
                     if len(radar_cols) >= 2:
-                        # Convert ordinal to numeric codes for aggregation
                         radar_df = filtered_df.copy()
                         for col in radar_cols:
                             if col in ordinal_cols and radar_df[col].dtype.name == "category":
@@ -237,7 +287,7 @@ if uploaded_file:
                         for i, row in agg_data.iterrows():
                             values = [row[col] for col in radar_cols]
                             fig_radar.add_trace(go.Scatterpolar(
-                                r=values + [values[0]],  # Close the loop
+                                r=values + [values[0]],
                                 theta=radar_cols + [radar_cols[0]],
                                 fill='toself',
                                 name=row[group_col],
@@ -254,10 +304,17 @@ if uploaded_file:
                 else:
                     st.info("Need at least 2 numeric/ordinal columns and 1 categorical column for radar charts.")
 
+            # Download Section
             st.subheader("Download Your Data")
-            if st.button("Download as CSV", help="Save the filtered data as a CSV file"):
-                csv = filtered_df.to_csv(index=False)
-                st.download_button(label="Download CSV", data=csv, file_name="processed_data.csv", mime="text/csv")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Download as CSV", help="Save the filtered data as a CSV file"):
+                    csv = filtered_df.to_csv(index=False)
+                    st.download_button(label="Download CSV", data=csv, file_name="processed_data.csv", mime="text/csv")
+            with col2:
+                if st.button("Download as PDF", help="Save the filtered data and summary as a PDF"):
+                    pdf_output = create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols)
+                    st.download_button(label="Download PDF", data=pdf_output, file_name="processed_data.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
@@ -272,7 +329,7 @@ else:
           - **Insights**: Comparisons and heatmaps.
           - **Explore**: Relationships and histograms.
           - **Profiles**: Radar charts for multi-variable analysis.
-        - **Download**: Save your filtered data!
+        - **Download**: Save as CSV or PDF!
         """)
 
 st.markdown("---\nCreated with ❤️ for DIVE")
