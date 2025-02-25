@@ -24,13 +24,14 @@ st.write("Upload your survey Excel file to generate tailored visualizations.")
 
 uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
 
+# Simplified column type detection
 def get_numeric_columns(df):
     return [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col]) and col != "User ID"]
 
 def get_categorical_columns(df):
-    return [col for col in df.columns if df[col].dtype.name in ['object', 'category']]
+    return [col for col in df.columns if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_categorical_dtype(df[col])]
 
-# Define ordinal sequences for categorical columns
+# Define ordinal sequences
 ordinal_sequences = {
     "Brand image": ["Muy negativa", "Negativa", "Neutra", "Positiva", "Muy positiva"],
     "Frequency": ["Nunca", "Una vez al mes", "Pocas veces al mes", "Una vez a la semana", "Varias veces a la semana"],
@@ -47,13 +48,22 @@ if uploaded_file:
             selected_sheet = st.selectbox("Select a sheet:", sheet_names)
             df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
 
+            # Debug: Show raw data
+            st.write("### Raw Data Preview")
+            st.dataframe(df.head())
+
             # Identify column types
             numeric_cols = get_numeric_columns(df)
             categorical_cols = get_categorical_columns(df)
 
+            # Debug: Display detected columns
+            st.write("### Detected Column Types")
+            st.write("Numeric Columns:", numeric_cols)
+            st.write("Categorical Columns:", categorical_cols)
+
             # Handle ordinal variables
+            ordinal_cols = []
             for col in numeric_cols[:]:  # Copy to avoid modifying list during iteration
-                # Convert to float and check if all non-NaN values are whole numbers
                 series = df[col].dropna().astype(float)
                 is_ordinal = (series.apply(lambda x: x.is_integer()).all() and 
                               series.min() >= 0 and series.max() <= 10 and series.nunique() <= 11)
@@ -61,15 +71,21 @@ if uploaded_file:
                     df[col] = pd.Categorical(df[col], categories=range(0, 11), ordered=True)
                     numeric_cols.remove(col)
                     categorical_cols.append(col)
+                    ordinal_cols.append(col)
 
-            ordinal_cols = []
-            for col in categorical_cols:
+            for col in categorical_cols[:]:
                 unique_vals = df[col].dropna().unique()
                 for seq_name, seq in ordinal_sequences.items():
                     if set(unique_vals).issubset(seq):
                         df[col] = pd.Categorical(df[col], categories=seq, ordered=True)
                         ordinal_cols.append(col)
                         break
+
+            # Debug: Updated column types after ordinal handling
+            st.write("### Updated Column Types After Ordinal Detection")
+            st.write("Numeric Columns:", numeric_cols)
+            st.write("Categorical Columns:", categorical_cols)
+            st.write("Ordinal Columns:", ordinal_cols)
 
             # Sidebar Filters
             st.sidebar.header("Filters")
@@ -95,17 +111,8 @@ if uploaded_file:
             col1.metric("Rows", filtered_df.shape[0])
             col2.metric("Columns", filtered_df.shape[1])
             col3.metric("Missing Values", filtered_df.isna().sum().sum())
-            with st.expander("View Data", expanded=False):
+            with st.expander("View Filtered Data", expanded=False):
                 st.dataframe(filtered_df)
-
-            # Detailed Statistics
-            with st.expander("Column Statistics"):
-                for col in filtered_df.columns:
-                    st.write(f"**{col}**")
-                    if col in numeric_cols:
-                        st.write(filtered_df[col].describe())
-                    elif col in categorical_cols:
-                        st.write(filtered_df[col].value_counts())
 
             # Tabs
             tab1, tab2, tab3, tab4 = st.tabs(["📈 Distribution", "🔄 Correlation", "📊 Categorical", "📅 Time Series"])
@@ -114,36 +121,42 @@ if uploaded_file:
             with tab1:
                 st.subheader("Distribution Analysis")
                 all_cols = numeric_cols + categorical_cols
+                st.write("Available columns for distribution:", all_cols)
                 if all_cols:
-                    selected_col = st.selectbox("Select a column:", all_cols)
+                    selected_col = st.selectbox("Select a column for distribution:", all_cols, key="dist_col")
                     if selected_col in numeric_cols:
+                        st.write(f"Plotting histogram for numeric column: {selected_col}")
                         fig_hist = px.histogram(filtered_df, x=selected_col, title=f"Histogram of {selected_col}")
                         st.plotly_chart(fig_hist, use_container_width=True)
                         fig_box = px.box(filtered_df, y=selected_col, title=f"Box Plot of {selected_col}")
                         st.plotly_chart(fig_box, use_container_width=True)
                     else:
+                        st.write(f"Plotting bar chart for categorical/ordinal column: {selected_col}")
                         if weight_col != "None" and weight_col in filtered_df.columns:
-                            counts = filtered_df.groupby(selected_col)[weight_col].sum().reset_index()
+                            counts = filtered_df.groupby(selected_col, observed=True)[weight_col].sum().reset_index()
                             counts.columns = [selected_col, "Weighted Count"]
                         else:
                             counts = filtered_df[selected_col].value_counts().reset_index()
                             counts.columns = [selected_col, "Count"]
                         if selected_col in ordinal_cols:
-                            order = ordinal_sequences[[k for k, v in ordinal_sequences.items() if selected_col in k][0]]
-                            counts[selected_col] = pd.Categorical(counts[selected_col], categories=order, ordered=True)
-                            counts = counts.sort_values(selected_col)
+                            order_key = [k for k, v in ordinal_sequences.items() if selected_col in k]
+                            if order_key:
+                                order = ordinal_sequences[order_key[0]]
+                                counts[selected_col] = pd.Categorical(counts[selected_col], categories=order, ordered=True)
+                                counts = counts.sort_values(selected_col)
                         fig = px.bar(counts, x=selected_col, y=counts.columns[1], title=f"Distribution of {selected_col}")
                         st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No columns available.")
+                    st.warning("No columns available for distribution analysis.")
 
             # Correlation Tab
             with tab2:
                 st.subheader("Correlation Analysis")
-                ordinal_cat_cols = [col for col in categorical_cols if df[col].dtype.name == 'category' and df[col].cat.ordered]
+                ordinal_cat_cols = [col for col in categorical_cols if pd.api.types.is_categorical_dtype(df[col]) and df[col].cat.ordered]
                 corr_cols = numeric_cols + ordinal_cat_cols
+                st.write("Columns available for correlation:", corr_cols)
                 if len(corr_cols) >= 2:
-                    selected_corr_cols = st.multiselect("Select columns:", corr_cols, default=corr_cols[:min(5, len(corr_cols))])
+                    selected_corr_cols = st.multiselect("Select columns for correlation:", corr_cols, default=corr_cols[:min(5, len(corr_cols))])
                     if len(selected_corr_cols) >= 2:
                         corr_method = st.radio("Correlation method:", ["Pearson", "Spearman"])
                         df_corr = filtered_df[selected_corr_cols].copy()
@@ -155,26 +168,29 @@ if uploaded_file:
                         sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', center=0, ax=ax)
                         st.pyplot(fig)
                     else:
-                        st.info("Select at least 2 columns.")
+                        st.info("Select at least 2 columns for correlation.")
                 else:
-                    st.info("Need at least 2 columns.")
+                    st.warning("Need at least 2 columns for correlation analysis.")
 
             # Categorical Tab
             with tab3:
                 st.subheader("Categorical Analysis")
+                st.write("Categorical columns available:", categorical_cols)
                 if categorical_cols:
-                    selected_cat_col = st.selectbox("Select a categorical column:", categorical_cols)
+                    selected_cat_col = st.selectbox("Select a categorical column:", categorical_cols, key="cat_col")
                     plot_type = st.radio("Plot type:", ["Bar", "Pie"])
                     if weight_col != "None" and weight_col in filtered_df.columns:
-                        counts = filtered_df.groupby(selected_cat_col)[weight_col].sum().reset_index()
+                        counts = filtered_df.groupby(selected_cat_col, observed=True)[weight_col].sum().reset_index()
                         counts.columns = [selected_cat_col, "Weighted Count"]
                     else:
                         counts = filtered_df[selected_cat_col].value_counts().reset_index()
                         counts.columns = [selected_cat_col, "Count"]
                     if selected_cat_col in ordinal_cols:
-                        order = ordinal_sequences[[k for k, v in ordinal_sequences.items() if selected_cat_col in k][0]]
-                        counts[selected_cat_col] = pd.Categorical(counts[selected_cat_col], categories=order, ordered=True)
-                        counts = counts.sort_values(selected_cat_col)
+                        order_key = [k for k, v in ordinal_sequences.items() if selected_cat_col in k]
+                        if order_key:
+                            order = ordinal_sequences[order_key[0]]
+                            counts[selected_cat_col] = pd.Categorical(counts[selected_cat_col], categories=order, ordered=True)
+                            counts = counts.sort_values(selected_cat_col)
                     if plot_type == "Bar":
                         fig = px.bar(counts, x=selected_cat_col, y=counts.columns[1], title=f"{selected_cat_col}")
                         st.plotly_chart(fig, use_container_width=True)
@@ -182,7 +198,7 @@ if uploaded_file:
                         fig = px.pie(counts, names=selected_cat_col, values=counts.columns[1], title=f"{selected_cat_col}")
                         st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info("No categorical columns.")
+                    st.warning("No categorical columns available.")
 
             # Time Series Tab
             with tab4:
