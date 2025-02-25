@@ -155,4 +155,103 @@ if uploaded_file:
                                                               categories=filtered_df[survey_col].cat.categories, ordered=True)
                             counts = counts.sort_values(survey_col)
                         fig_survey = px.bar(counts, x=survey_col, y=counts.columns[1], title=f"{survey_col}",
-                                          template
+                                          template="plotly_white", color_discrete_sequence=["#00cc96"])
+                        fig_survey.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_survey, use_container_width=True, key="overview_survey_chart")
+                    else:
+                        st.info("No survey-like columns available.")
+
+            # Insights Tab
+            with tab2:
+                st.subheader("Insights")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    survey_cols = ordinal_cols + categorical_cols
+                    if survey_cols and numeric_cols:
+                        survey_x = st.selectbox("Survey Question (X)", survey_cols, key="comp_survey")
+                        num_y = st.selectbox("Numeric (Y)", numeric_cols, key="comp_num")
+                        fig_comp = px.box(filtered_df, x=survey_x, y=num_y, title=f"{num_y} by {survey_x}",
+                                        template="plotly_white", color_discrete_sequence=["#ff5733"])
+                        fig_comp.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_comp, use_container_width=True, key="insights_box_chart")
+                    else:
+                        st.info("Need survey and numeric columns for insights.")
+
+                with col2:
+                    if len(survey_cols) >= 2:
+                        survey_x2 = st.selectbox("Survey Question (X-axis)", survey_cols, key="comp_survey_x")
+                        survey_y2 = st.selectbox("Survey Question (Color)", 
+                                               [col for col in survey_cols if col != survey_x2], key="comp_survey_y")
+                        if weight_col != "None" and weight_col in filtered_df.columns:
+                            cross_tab = filtered_df.groupby([survey_x2, survey_y2], observed=True)[weight_col].sum().reset_index()
+                            cross_tab.columns = [survey_x2, survey_y2, "Weighted Count"]
+                        else:
+                            cross_tab = pd.crosstab(filtered_df[survey_x2], filtered_df[survey_y2]).reset_index()
+                            cross_tab = cross_tab.melt(id_vars=[survey_x2], var_name=survey_y2, value_name="Count")
+                        fig_cross = px.bar(cross_tab, x=survey_x2, y="Count", color=survey_y2, 
+                                         title=f"{survey_x2} vs {survey_y2}", barmode="group",
+                                         template="plotly_white", color_discrete_sequence=px.colors.qualitative.Pastel)
+                        fig_cross.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_cross, use_container_width=True, key="insights_bar_chart")
+                    else:
+                        st.info("Need at least two survey columns for comparison.")
+
+            # Explore Tab
+            with tab3:
+                st.subheader("Explore Relationships")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    if len(numeric_cols) >= 2:
+                        num_x = st.selectbox("Numeric X", numeric_cols, key="rel_num_x")
+                        num_y = st.selectbox("Numeric Y", [col for col in numeric_cols if col != num_x], key="rel_num_y")
+                        fig_scatter = px.scatter(filtered_df, x=num_x, y=num_y, title=f"{num_x} vs {num_y}", 
+                                               trendline="ols", template="plotly_white", 
+                                               color_discrete_sequence=["#636efa"])
+                        fig_scatter.update_layout(font=dict(size=12))
+                        st.plotly_chart(fig_scatter, use_container_width=True, key="explore_scatter_chart")
+                    else:
+                        st.info("Need at least two numeric columns.")
+
+                with col2:
+                    survey_cols = ordinal_cols + categorical_cols
+                    if survey_cols and (numeric_cols or len(survey_cols) >= 2):
+                        survey_x = st.selectbox("Survey Question", survey_cols, key="rel_survey_x")
+                        y_options = numeric_cols + [col for col in survey_cols if col != survey_x]
+                        y_col = st.selectbox("Y-Axis (Numeric or Survey)", y_options, key="rel_y")
+                        if y_col in numeric_cols:
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{y_col} by {survey_x}",
+                                           template="plotly_white", color_discrete_sequence=["#ab63fa"])
+                        else:
+                            y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_data, 
+                                           title=f"{y_col} {'(codes)' if y_col in ordinal_cols else ''} by {survey_x}",
+                                           template="plotly_white", color_discrete_sequence=["#ab63fa"])
+                        fig_rel.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_rel, use_container_width=True, key="explore_box_chart")
+                    else:
+                        st.info("Need survey and numeric/survey columns.")
+
+            # Download
+            st.subheader("Download Your Data")
+            if st.button("Download as CSV", help="Save the filtered data as a CSV file"):
+                csv = filtered_df.to_csv(index=False)
+                st.download_button(label="Download CSV", data=csv, file_name="processed_data.csv", mime="text/csv")
+
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+else:
+    st.info("👈 Upload an Excel file to get started!")
+    with st.expander("How to Use This Tool"):
+        st.markdown("""
+        - **Upload**: Drop your Excel file (.xlsx or .xls) to analyze.
+        - **Filter**: Use the sidebar to refine your data.
+        - **Explore**: Check out the tabs:
+          - **Overview**: See distributions of your data.
+          - **Insights**: Compare variables for deeper understanding.
+          - **Explore**: Discover relationships between columns.
+        - **Download**: Save your filtered data anytime!
+        """)
+
+st.markdown("---\nCreated with ❤️ for DIVE")
