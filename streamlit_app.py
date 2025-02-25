@@ -52,9 +52,12 @@ if uploaded_file:
             categorical_cols = get_categorical_columns(df)
 
             # Handle ordinal variables
-            for col in numeric_cols:
-                if (df[col].dropna().apply(float.is_integer).all() and 
-                    df[col].min() >= 0 and df[col].max() <= 10 and df[col].nunique() <= 11):
+            for col in numeric_cols[:]:  # Copy to avoid modifying list during iteration
+                # Convert to float and check if all non-NaN values are whole numbers
+                series = df[col].dropna().astype(float)
+                is_ordinal = (series.apply(lambda x: x.is_integer()).all() and 
+                              series.min() >= 0 and series.max() <= 10 and series.nunique() <= 11)
+                if is_ordinal:
                     df[col] = pd.Categorical(df[col], categories=range(0, 11), ordered=True)
                     numeric_cols.remove(col)
                     categorical_cols.append(col)
@@ -181,12 +184,12 @@ if uploaded_file:
                 else:
                     st.info("No categorical columns.")
 
-            # Time Series Tab (unchanged, minimal relevance)
+            # Time Series Tab
             with tab4:
                 st.subheader("Time Series Analysis")
                 st.info("No datetime columns detected in your data.")
 
-            # Download Options (unchanged)
+            # Download Options
             st.subheader("Download Options")
             download_format = st.radio("Select download format:", ["CSV", "Excel", "JSON"])
             if st.button("Download Processed Data"):
