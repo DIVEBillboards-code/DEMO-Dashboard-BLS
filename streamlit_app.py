@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from io import BytesIO
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
-# Enhanced CSS for better UX
+# Enhanced CSS
 st.markdown("""
 <style>
     .main { padding: 2rem; background-color: #f9f9f9; }
@@ -26,7 +27,6 @@ st.markdown("""
 st.title("📊 Excel Data Visualizer")
 st.write("Explore your data with interactive visualizations!")
 
-# File Uploader
 uploaded_file = st.file_uploader("Upload your Excel file here", type=["xlsx", "xls"], help="Supports .xlsx and .xls formats.")
 
 def detect_survey_columns(df):
@@ -77,12 +77,9 @@ if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file)
             st.success("File uploaded successfully!")
-            
-            # Sidebar Controls
+
             with st.sidebar:
                 st.header("Controls")
-                
-                # Filters
                 with st.expander("Filters", expanded=True):
                     filterable_cols = [col for col in df.columns if df[col].nunique() <= 20]
                     filters = {}
@@ -93,13 +90,11 @@ if uploaded_file:
                     if st.button("Reset Filters"):
                         st.rerun()
 
-                # Weight Selection
                 numeric_cols, categorical_cols, ordinal_cols = detect_survey_columns(df)
                 weight_options = ["None"] + numeric_cols
                 weight_col = st.selectbox("Apply weights (optional)", weight_options, index=0, 
                                         help="Choose a numeric column to weight the data.")
 
-            # Apply filters
             filtered_df = df.copy()
             for col, vals in filters.items():
                 filtered_df = filtered_df[filtered_df[col].isin(vals)]
@@ -107,7 +102,6 @@ if uploaded_file:
                 st.warning("Filters resulted in no data. Showing full dataset instead.")
                 filtered_df = df.copy()
 
-            # Main Content
             st.subheader("Data Overview", anchor="overview")
             col1, col2, col3 = st.columns(3)
             col1.metric("Rows", filtered_df.shape[0])
@@ -121,8 +115,7 @@ if uploaded_file:
                 st.write(f"**Categorical (Unordered):** {categorical_cols}")
                 st.write(f"**Ordinal (Survey-like):** {ordinal_cols}")
 
-            # Tabs
-            tab1, tab2, tab3 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles"])
 
             # Overview Tab
             with tab1:
@@ -130,15 +123,16 @@ if uploaded_file:
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    if numeric_cols:
-                        num_col = st.selectbox("Numeric Data", numeric_cols, key="num_overview")
-                        fig_num = px.histogram(filtered_df, x=num_col, title=f"{num_col} Distribution",
-                                             template="plotly_white", color_discrete_sequence=["#0078d4"],
-                                             nbins=min(50, filtered_df[num_col].nunique()))
-                        fig_num.update_layout(xaxis_title=num_col, yaxis_title="Count", font=dict(size=12))
-                        st.plotly_chart(fig_num, use_container_width=True, key="overview_num_chart")
+                    if categorical_cols:
+                        cat_col = st.selectbox("Categorical Data", categorical_cols, key="cat_overview")
+                        counts = filtered_df[cat_col].value_counts().reset_index()
+                        counts.columns = [cat_col, "Count"]
+                        fig_pie = px.pie(counts, names=cat_col, values="Count", title=f"{cat_col} Breakdown",
+                                       template="plotly_white", color_discrete_sequence=px.colors.qualitative.Pastel)
+                        fig_pie.update_layout(font=dict(size=12))
+                        st.plotly_chart(fig_pie, use_container_width=True, key="overview_pie_chart")
                     else:
-                        st.info("No numeric columns available.")
+                        st.info("No categorical columns available.")
 
                 with col2:
                     survey_cols = ordinal_cols + categorical_cols
@@ -154,10 +148,10 @@ if uploaded_file:
                             counts[survey_col] = pd.Categorical(counts[survey_col], 
                                                               categories=filtered_df[survey_col].cat.categories, ordered=True)
                             counts = counts.sort_values(survey_col)
-                        fig_survey = px.bar(counts, x=survey_col, y=counts.columns[1], title=f"{survey_col}",
-                                          template="plotly_white", color_discrete_sequence=["#00cc96"])
-                        fig_survey.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
-                        st.plotly_chart(fig_survey, use_container_width=True, key="overview_survey_chart")
+                        fig_bar = px.bar(counts, x=survey_col, y=counts.columns[1], title=f"{survey_col}",
+                                       template="plotly_white", color_discrete_sequence=["#00cc96"])
+                        fig_bar.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_bar, use_container_width=True, key="overview_bar_chart")
                     else:
                         st.info("No survey-like columns available.")
 
@@ -171,31 +165,26 @@ if uploaded_file:
                     if survey_cols and numeric_cols:
                         survey_x = st.selectbox("Survey Question (X)", survey_cols, key="comp_survey")
                         num_y = st.selectbox("Numeric (Y)", numeric_cols, key="comp_num")
-                        fig_comp = px.box(filtered_df, x=survey_x, y=num_y, title=f"{num_y} by {survey_x}",
-                                        template="plotly_white", color_discrete_sequence=["#ff5733"])
-                        fig_comp.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
-                        st.plotly_chart(fig_comp, use_container_width=True, key="insights_box_chart")
+                        fig_box = px.box(filtered_df, x=survey_x, y=num_y, title=f"{num_y} by {survey_x}",
+                                       template="plotly_white", color_discrete_sequence=["#ff5733"])
+                        fig_box.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_box, use_container_width=True, key="insights_box_chart")
                     else:
                         st.info("Need survey and numeric columns for insights.")
 
                 with col2:
                     if len(survey_cols) >= 2:
                         survey_x2 = st.selectbox("Survey Question (X-axis)", survey_cols, key="comp_survey_x")
-                        survey_y2 = st.selectbox("Survey Question (Color)", 
+                        survey_y2 = st.selectbox("Survey Question (Y-axis)", 
                                                [col for col in survey_cols if col != survey_x2], key="comp_survey_y")
-                        if weight_col != "None" and weight_col in filtered_df.columns:
-                            cross_tab = filtered_df.groupby([survey_x2, survey_y2], observed=True)[weight_col].sum().reset_index()
-                            cross_tab.columns = [survey_x2, survey_y2, "Weighted Count"]
-                        else:
-                            cross_tab = pd.crosstab(filtered_df[survey_x2], filtered_df[survey_y2]).reset_index()
-                            cross_tab = cross_tab.melt(id_vars=[survey_x2], var_name=survey_y2, value_name="Count")
-                        fig_cross = px.bar(cross_tab, x=survey_x2, y="Count", color=survey_y2, 
-                                         title=f"{survey_x2} vs {survey_y2}", barmode="group",
-                                         template="plotly_white", color_discrete_sequence=px.colors.qualitative.Pastel)
-                        fig_cross.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
-                        st.plotly_chart(fig_cross, use_container_width=True, key="insights_bar_chart")
+                        cross_tab = pd.crosstab(filtered_df[survey_x2], filtered_df[survey_y2])
+                        fig_heatmap = px.imshow(cross_tab, text_auto=True, aspect="auto",
+                                              title=f"{survey_x2} vs {survey_y2}", 
+                                              color_continuous_scale="Blues", template="plotly_white")
+                        fig_heatmap.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                        st.plotly_chart(fig_heatmap, use_container_width=True, key="insights_heatmap_chart")
                     else:
-                        st.info("Need at least two survey columns for comparison.")
+                        st.info("Need at least two survey columns for heatmap.")
 
             # Explore Tab
             with tab3:
@@ -203,16 +192,15 @@ if uploaded_file:
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    if len(numeric_cols) >= 2:
-                        num_x = st.selectbox("Numeric X", numeric_cols, key="rel_num_x")
-                        num_y = st.selectbox("Numeric Y", [col for col in numeric_cols if col != num_x], key="rel_num_y")
-                        fig_scatter = px.scatter(filtered_df, x=num_x, y=num_y, title=f"{num_x} vs {num_y}", 
-                                               trendline="ols", template="plotly_white", 
-                                               color_discrete_sequence=["#636efa"])
-                        fig_scatter.update_layout(font=dict(size=12))
-                        st.plotly_chart(fig_scatter, use_container_width=True, key="explore_scatter_chart")
+                    if numeric_cols:
+                        num_col = st.selectbox("Numeric Data", numeric_cols, key="num_explore")
+                        fig_hist = px.histogram(filtered_df, x=num_col, title=f"{num_col} Distribution",
+                                              template="plotly_white", color_discrete_sequence=["#0078d4"],
+                                              nbins=min(50, filtered_df[num_col].nunique()))
+                        fig_hist.update_layout(font=dict(size=12))
+                        st.plotly_chart(fig_hist, use_container_width=True, key="explore_hist_chart")
                     else:
-                        st.info("Need at least two numeric columns.")
+                        st.info("No numeric columns available.")
 
                 with col2:
                     survey_cols = ordinal_cols + categorical_cols
@@ -233,6 +221,37 @@ if uploaded_file:
                     else:
                         st.info("Need survey and numeric/survey columns.")
 
+            # Profiles Tab (Radar Charts)
+            with tab4:
+                st.subheader("Profiles")
+                survey_cols = ordinal_cols + [col for col in numeric_cols if col != weight_col]
+                if len(survey_cols) >= 2:
+                    group_col = st.selectbox("Group By", categorical_cols, key="radar_group")
+                    radar_cols = st.multiselect("Select Variables (2+)", survey_cols, default=survey_cols[:min(3, len(survey_cols))], 
+                                              key="radar_vars")
+                    if len(radar_cols) >= 2:
+                        # Aggregate data
+                        agg_data = filtered_df.groupby(group_col)[radar_cols].mean().reset_index()
+                        fig_radar = go.Figure()
+                        for i, row in agg_data.iterrows():
+                            values = [row[col] if col in numeric_cols else row[col].cat.codes for col in radar_cols]
+                            fig_radar.add_trace(go.Scatterpolar(
+                                r=values + [values[0]],  # Close the loop
+                                theta=radar_cols + [radar_cols[0]],
+                                fill='toself',
+                                name=row[group_col],
+                                line=dict(color=px.colors.qualitative.Pastel[i % len(px.colors.qualitative.Pastel)])
+                            ))
+                        fig_radar.update_layout(
+                            polar=dict(radialaxis=dict(visible=True, range=[0, max(10, agg_data[radar_cols].max().max())])),
+                            showlegend=True, template="plotly_white", font=dict(size=12)
+                        )
+                        st.plotly_chart(fig_radar, use_container_width=True, key="profiles_radar_chart")
+                    else:
+                        st.info("Select at least 2 variables for radar chart.")
+                else:
+                    st.info("Need at least 2 survey/numeric columns for radar charts.")
+
             # Download
             st.subheader("Download Your Data")
             if st.button("Download as CSV", help="Save the filtered data as a CSV file"):
@@ -246,12 +265,13 @@ else:
     with st.expander("How to Use This Tool"):
         st.markdown("""
         - **Upload**: Drop your Excel file (.xlsx or .xls) to analyze.
-        - **Filter**: Use the sidebar to refine your data.
-        - **Explore**: Check out the tabs:
-          - **Overview**: See distributions of your data.
-          - **Insights**: Compare variables for deeper understanding.
-          - **Explore**: Discover relationships between columns.
-        - **Download**: Save your filtered data anytime!
+        - **Filter**: Refine your data in the sidebar.
+        - **Explore Tabs**:
+          - **Overview**: Distributions and breakdowns.
+          - **Insights**: Comparisons and heatmaps.
+          - **Explore**: Relationships and histograms.
+          - **Profiles**: Radar charts for multi-variable analysis.
+        - **Download**: Save your filtered data!
         """)
 
 st.markdown("---\nCreated with ❤️ for DIVE")
