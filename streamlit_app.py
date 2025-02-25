@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from io import BytesIO
 from fpdf import FPDF
 import plotly.io as pio
+import os
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
@@ -74,7 +75,7 @@ def detect_survey_columns(df):
 
     return numeric_cols, categorical_cols, ordinal_cols
 
-def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols):
+def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -103,21 +104,28 @@ def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols):
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "Filtered Data Preview", ln=True)
     pdf.set_font("Arial", "", 8)
-    col_width = pdf.w / (len(filtered_df.columns) + 1)  # Adjust width based on number of columns
+    col_width = pdf.w / (len(filtered_df.columns) + 1)
     row_height = 6
 
-    # Header
     for col in filtered_df.columns:
         pdf.cell(col_width, row_height, str(col), border=1)
     pdf.ln(row_height)
 
-    # Data (first 10 rows)
     for i, row in filtered_df.head(10).iterrows():
         for value in row:
-            pdf.cell(col_width, row_height, str(value)[:20], border=1)  # Truncate long text
+            pdf.cell(col_width, row_height, str(value)[:20], border=1)
         pdf.ln(row_height)
 
-    # Output to BytesIO
+    # Add Graphs
+    pdf.set_font("Arial", "B", 12)
+    for fig_name, fig in figures.items():
+        pdf.add_page()
+        pdf.cell(0, 10, f"Visualization: {fig_name}", ln=True)
+        img_path = f"{fig_name.replace(' ', '_')}.png"
+        pio.write_image(fig, img_path, width=800, height=600)
+        pdf.image(img_path, x=10, y=pdf.get_y() + 5, w=190)
+        os.remove(img_path)  # Clean up temporary file
+
     pdf_output = BytesIO()
     pdf_output.write(pdf.output(dest='S').encode('latin1'))
     pdf_output.seek(0)
@@ -166,6 +174,9 @@ if uploaded_file:
                 st.write(f"**Categorical (Unordered):** {categorical_cols}")
                 st.write(f"**Ordinal (Survey-like):** {ordinal_cols}")
 
+            # Store figures for PDF
+            figures = {}
+
             tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles"])
 
             with tab1:
@@ -181,6 +192,7 @@ if uploaded_file:
                                        template="plotly_white", color_discrete_sequence=px.colors.qualitative.Pastel)
                         fig_pie.update_layout(font=dict(size=12))
                         st.plotly_chart(fig_pie, use_container_width=True, key="overview_pie_chart")
+                        figures["Overview Pie Chart"] = fig_pie
                     else:
                         st.info("No categorical columns available.")
 
@@ -202,6 +214,7 @@ if uploaded_file:
                                        template="plotly_white", color_discrete_sequence=["#00cc96"])
                         fig_bar.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
                         st.plotly_chart(fig_bar, use_container_width=True, key="overview_bar_chart")
+                        figures["Overview Bar Chart"] = fig_bar
                     else:
                         st.info("No survey-like columns available.")
 
@@ -218,6 +231,7 @@ if uploaded_file:
                                        template="plotly_white", color_discrete_sequence=["#ff5733"])
                         fig_box.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
                         st.plotly_chart(fig_box, use_container_width=True, key="insights_box_chart")
+                        figures["Insights Box Plot"] = fig_box
                     else:
                         st.info("Need survey and numeric columns for insights.")
 
@@ -232,6 +246,7 @@ if uploaded_file:
                                               color_continuous_scale="Blues", template="plotly_white")
                         fig_heatmap.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
                         st.plotly_chart(fig_heatmap, use_container_width=True, key="insights_heatmap_chart")
+                        figures["Insights Heatmap"] = fig_heatmap
                     else:
                         st.info("Need at least two survey columns for heatmap.")
 
@@ -247,6 +262,7 @@ if uploaded_file:
                                               nbins=min(50, filtered_df[num_col].nunique()))
                         fig_hist.update_layout(font=dict(size=12))
                         st.plotly_chart(fig_hist, use_container_width=True, key="explore_hist_chart")
+                        figures["Explore Histogram"] = fig_hist
                     else:
                         st.info("No numeric columns available.")
 
@@ -257,7 +273,7 @@ if uploaded_file:
                         y_options = numeric_cols + [col for col in survey_cols if col != survey_x]
                         y_col = st.selectbox("Y-Axis (Numeric or Survey)", y_options, key="rel_y")
                         if y_col in numeric_cols:
-                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{y_col} by {survey_x}",
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{num_y} by {survey_x}",
                                            template="plotly_white", color_discrete_sequence=["#ab63fa"])
                         else:
                             y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
@@ -266,6 +282,7 @@ if uploaded_file:
                                            template="plotly_white", color_discrete_sequence=["#ab63fa"])
                         fig_rel.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
                         st.plotly_chart(fig_rel, use_container_width=True, key="explore_box_chart")
+                        figures["Explore Box Plot"] = fig_rel
                     else:
                         st.info("Need survey and numeric/survey columns.")
 
@@ -299,12 +316,12 @@ if uploaded_file:
                             showlegend=True, template="plotly_white", font=dict(size=12)
                         )
                         st.plotly_chart(fig_radar, use_container_width=True, key="profiles_radar_chart")
+                        figures["Profiles Radar Chart"] = fig_radar
                     else:
                         st.info("Select at least 2 numeric or ordinal variables for radar chart.")
                 else:
                     st.info("Need at least 2 numeric/ordinal columns and 1 categorical column for radar charts.")
 
-            # Download Section
             st.subheader("Download Your Data")
             col1, col2 = st.columns(2)
             with col1:
@@ -312,9 +329,10 @@ if uploaded_file:
                     csv = filtered_df.to_csv(index=False)
                     st.download_button(label="Download CSV", data=csv, file_name="processed_data.csv", mime="text/csv")
             with col2:
-                if st.button("Download as PDF", help="Save the filtered data and summary as a PDF"):
-                    pdf_output = create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols)
-                    st.download_button(label="Download PDF", data=pdf_output, file_name="processed_data.pdf", mime="application/pdf")
+                if st.button("Download as PDF", help="Save data and graphs as a PDF"):
+                    with st.spinner("Generating PDF with graphs..."):
+                        pdf_output = create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures)
+                        st.download_button(label="Download PDF", data=pdf_output, file_name="processed_data_with_graphs.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Error processing file: {e}")
@@ -329,7 +347,7 @@ else:
           - **Insights**: Comparisons and heatmaps.
           - **Explore**: Relationships and histograms.
           - **Profiles**: Radar charts for multi-variable analysis.
-        - **Download**: Save as CSV or PDF!
+        - **Download**: Save as CSV or PDF with graphs!
         """)
 
 st.markdown("---\nCreated with ❤️ for DIVE")
