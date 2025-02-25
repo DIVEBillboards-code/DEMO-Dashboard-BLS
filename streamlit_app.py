@@ -36,7 +36,7 @@ def detect_survey_columns(df):
         # Numeric columns
         if pd.api.types.is_numeric_dtype(df[col]):
             series = df[col].dropna().astype(float)
-            # Continuous: >20 unique values and not all integers (stricter threshold)
+            # Continuous: >20 unique values and not all integers
             if series.nunique() > 20 and not series.apply(lambda x: x.is_integer()).all():
                 numeric_cols.append(col)
             # Ordinal: Integer scale (e.g., 0-10) or <=10 unique values
@@ -58,6 +58,20 @@ def detect_survey_columns(df):
             # Categorical: Any other text column
             else:
                 categorical_cols.append(col)
+
+    # Manual override: Ensure '[Brand image]' is ordinal if present
+    brand_image_col = '[Brand image] This is an advertisement for Cetaphil. What image does it give you of Cetaphil?'
+    if brand_image_col in categorical_cols:
+        categorical_cols.remove(brand_image_col)
+        ordinal_cols.append(brand_image_col)
+        df[brand_image_col] = pd.Categorical(df[brand_image_col], 
+                                            categories=["Negative", "Neutral", "Positive"], ordered=True)  # Adjust categories as needed
+
+    # Move '[Attribution]' to categorical if misclassified
+    attribution_col = '[Attribution] In your opinion, this ad is for:'
+    if attribution_col in ordinal_cols:
+        ordinal_cols.remove(attribution_col)
+        categorical_cols.append(attribution_col)
 
     return numeric_cols, categorical_cols, ordinal_cols
 
@@ -88,8 +102,8 @@ if uploaded_file:
         for col, vals in filters.items():
             filtered_df = filtered_df[filtered_df[col].isin(vals)]
         if filtered_df.empty:
-            st.warning("Filters resulted in no data. Adjust filters to see visualizations.")
-            st.stop()
+            st.warning("Filters resulted in no data. Showing full dataset instead.")
+            filtered_df = df.copy()  # Fall back to full data
 
         # Weight column selection
         weight_options = ["None"] + numeric_cols
@@ -129,7 +143,7 @@ if uploaded_file:
                     else:
                         counts = filtered_df[survey_col].value_counts().reset_index()
                         counts.columns = [survey_col, "Count"]
-                    if survey_col in ordinal_cols:
+                    if survey_col in ordinal_cols and filtered_df[survey_col].dtype.name == "category":
                         counts[survey_col] = pd.Categorical(counts[survey_col], 
                                                           categories=filtered_df[survey_col].cat.categories, ordered=True)
                         counts = counts.sort_values(survey_col)
@@ -193,7 +207,7 @@ if uploaded_file:
                     if y_col in numeric_cols:
                         fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{y_col} by {survey_x}")
                     else:
-                        y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols else filtered_df[y_col]
+                        y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
                         fig_rel = px.box(filtered_df, x=survey_x, y=y_data, 
                                        title=f"{y_col} {'(codes)' if y_col in ordinal_cols else ''} by {survey_x}")
                     st.plotly_chart(fig_rel, use_container_width=True, key="rel_box_chart")
