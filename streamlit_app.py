@@ -6,10 +6,11 @@ from io import BytesIO
 from fpdf import FPDF
 import plotly.io as pio
 import os
+import numpy as np  # Added for numerical operations
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
-# Custom CSS
+# Custom CSS (unchanged)
 st.markdown("""
 <style>
     .main { padding: 2rem; background-color: #f9f9f9; }
@@ -61,21 +62,58 @@ def detect_survey_columns(df):
             else:
                 categorical_cols.append(col)
 
-    brand_image_col = '[Brand image] This is an advertisement for Cetaphil. What image does it give you of Cetaphil?'
+    # Adjust for the specific columns in this dataset
+    brand_image_col = '[Brand image] Este es un anuncio de Coca Cola. ¿Qué imagen te da de Coca Cola?'
     if brand_image_col in categorical_cols:
         categorical_cols.remove(brand_image_col)
         ordinal_cols.append(brand_image_col)
         df[brand_image_col] = pd.Categorical(df[brand_image_col], 
-                                            categories=["Negative", "Neutral", "Positive"], ordered=True)
+                                            categories=["Muy negativa", "Negativa", "Neutra", "Positiva", "Muy positiva"], ordered=True)
 
-    attribution_col = '[Attribution] In your opinion, this ad is for:'
+    attribution_col = '[Attribution] Según tu opinión, este anuncio es para:'
     if attribution_col in ordinal_cols:
         ordinal_cols.remove(attribution_col)
         categorical_cols.append(attribution_col)
 
     return numeric_cols, categorical_cols, ordinal_cols
 
-def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures):
+def calculate_impact_score(df, ad_recall_col, kpi_col):
+    # Step 1: Define control and exposed groups
+    df['Group'] = df[ad_recall_col].apply(lambda x: 'Exposed' if x in ['Sí, una vez', 'Sí, varias veces'] else 'Control')
+
+    # Step 2: Calculate the average KPI for the control group
+    control_avg = df[df['Group'] == 'Control'][kpi_col].mean()
+
+    # Step 3: Calculate uplift for the exposed group (x_i = KPI value - control group average)
+    exposed_df = df[df['Group'] == 'Exposed'].copy()
+    exposed_df['Uplift'] = exposed_df[kpi_col] - control_avg
+
+    # Step 4: Calculate benchmarks (top 25% and bottom 10% of uplifts)
+    uplifts = exposed_df['Uplift'].dropna()
+    if uplifts.empty:
+        return None, "No data available for the exposed group."
+    
+    top_25_threshold = uplifts.quantile(0.75)
+    bottom_10_threshold = uplifts.quantile(0.10)
+    
+    x_i_top25 = uplifts[uplifts >= top_25_threshold].mean()  # Average of top 25%
+    x_i_flop10 = uplifts[uplifts <= bottom_10_threshold].mean()  # Average of bottom 10%
+
+    # Avoid division by zero
+    denominator = x_i_top25 - x_i_flop10
+    if denominator == 0:
+        return None, "Denominator (x_i_top25 - x_i_flop10) is zero, cannot calculate IS."
+
+    # Step 5: Calculate the IS for each respondent in the exposed group
+    exposed_df['IS_Component'] = (exposed_df['Uplift'] - x_i_flop10) / denominator
+
+    # Step 6: Sum the IS components and divide by the number of KPIs (n=1), then multiply by 100
+    n = 1  # Since we're evaluating only one KPI
+    IS = (exposed_df['IS_Component'].sum() / n) * 100
+
+    return IS, None
+
+def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures, impact_score=None, impact_score_error=None):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -99,6 +137,15 @@ def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figure
     pdf.cell(0, 6, f"Numeric (Continuous): {', '.join(numeric_cols)}", ln=True)
     pdf.cell(0, 6, f"Categorical (Unordered): {', '.join(categorical_cols)}", ln=True)
     pdf.cell(0, 6, f"Ordinal (Survey-like): {', '.join(ordinal_cols)}", ln=True)
+
+    # Impact Score
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "Impact Score", ln=True)
+    pdf.set_font("Arial", "", 10)
+    if impact_score is not None:
+        pdf.cell(0, 6, f"Impact Score (IS): {impact_score:.2f}", ln=True)
+    else:
+        pdf.cell(0, 6, f"Impact Score (IS): Not calculated ({impact_score_error})", ln=True)
 
     # Data Table
     pdf.set_font("Arial", "B", 12)
@@ -137,6 +184,10 @@ if uploaded_file:
             df = pd.read_excel(uploaded_file)
             st.success("File uploaded successfully!")
 
+            # Define control and exposed groups
+            ad_recall_col = '[Ad recall] ¿Recuerda haber visto este anuncio en un cartel digital?'
+            df['Group'] = df[ad_recall_col].apply(lambda x: 'Exposed' if x in ['Sí, una vez', 'Sí, varias veces'] else 'Control')
+
             with st.sidebar:
                 st.header("Controls")
                 with st.expander("Filters", expanded=True):
@@ -162,10 +213,11 @@ if uploaded_file:
                 filtered_df = df.copy()
 
             st.subheader("Data Overview", anchor="overview")
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Rows", filtered_df.shape[0])
             col2.metric("Columns", filtered_df.shape[1])
             col3.metric("Missing Values", filtered_df.isna().sum().sum())
+            col4.metric("Exposed Group", len(filtered_df[filtered_df['Group'] == 'Exposed']))
 
             with st.expander("View Data Preview"):
                 st.dataframe(filtered_df.head())
@@ -174,10 +226,20 @@ if uploaded_file:
                 st.write(f"**Categorical (Unordered):** {categorical_cols}")
                 st.write(f"**Ordinal (Survey-like):** {ordinal_cols}")
 
+            # Calculate Impact Score for the Consideration KPI
+            kpi_col = '[Consideration] ¿En el futuro considerarías comprar Coca Cola?'
+            impact_score, impact_score_error = calculate_impact_score(filtered_df, ad_recall_col, kpi_col)
+
+            st.subheader("Impact Score Analysis")
+            if impact_score is not None:
+                st.metric("Impact Score (IS)", f"{impact_score:.2f}")
+            else:
+                st.error(f"Could not calculate Impact Score: {impact_score_error}")
+
             # Store figures for PDF
             figures = {}
 
-            tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "📈 Insights", "🔄 Explore", "🌟 Profiles", "📉 Impact Analysis"])
 
             with tab1:
                 st.subheader("Overview")
@@ -273,7 +335,7 @@ if uploaded_file:
                         y_options = numeric_cols + [col for col in survey_cols if col != survey_x]
                         y_col = st.selectbox("Y-Axis (Numeric or Survey)", y_options, key="rel_y")
                         if y_col in numeric_cols:
-                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{num_y} by {survey_x}",
+                            fig_rel = px.box(filtered_df, x=survey_x, y=y_col, title=f"{y_col} by {survey_x}",
                                            template="plotly_white", color_discrete_sequence=["#ab63fa"])
                         else:
                             y_data = filtered_df[y_col].cat.codes if y_col in ordinal_cols and filtered_df[y_col].dtype.name == "category" else filtered_df[y_col]
@@ -322,6 +384,32 @@ if uploaded_file:
                 else:
                     st.info("Need at least 2 numeric/ordinal columns and 1 categorical column for radar charts.")
 
+            with tab5:
+                st.subheader("Impact Analysis: Control vs Exposed Groups")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Box plot comparing Consideration between Control and Exposed groups
+                    fig_box_impact = px.box(filtered_df, x='Group', y=kpi_col,
+                                            title=f"{kpi_col} by Group",
+                                            template="plotly_white", color='Group',
+                                            color_discrete_sequence=["#ff5733", "#00cc96"])
+                    fig_box_impact.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                    st.plotly_chart(fig_box_impact, use_container_width=True, key="impact_box_chart")
+                    figures["Impact Box Plot"] = fig_box_impact
+
+                with col2:
+                    # Histogram of Consideration scores for both groups
+                    fig_hist_impact = px.histogram(filtered_df, x=kpi_col, color='Group',
+                                                  title=f"{kpi_col} Distribution by Group",
+                                                  template="plotly_white",
+                                                  color_discrete_sequence=["#ff5733", "#00cc96"],
+                                                  nbins=min(50, filtered_df[kpi_col].nunique()))
+                    fig_hist_impact.update_layout(font=dict(size=12), barmode='overlay')
+                    fig_hist_impact.update_traces(opacity=0.75)
+                    st.plotly_chart(fig_hist_impact, use_container_width=True, key="impact_hist_chart")
+                    figures["Impact Histogram"] = fig_hist_impact
+
             st.subheader("Download Your Data")
             col1, col2 = st.columns(2)
             with col1:
@@ -331,7 +419,7 @@ if uploaded_file:
             with col2:
                 if st.button("Download as PDF", help="Save data and graphs as a PDF"):
                     with st.spinner("Generating PDF with graphs..."):
-                        pdf_output = create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures)
+                        pdf_output = create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figures, impact_score, impact_score_error)
                         st.download_button(label="Download PDF", data=pdf_output, file_name="processed_data_with_graphs.pdf", mime="application/pdf")
 
         except Exception as e:
@@ -347,6 +435,7 @@ else:
           - **Insights**: Comparisons and heatmaps.
           - **Explore**: Relationships and histograms.
           - **Profiles**: Radar charts for multi-variable analysis.
+          - **Impact Analysis**: Compare control vs exposed groups and view Impact Score.
         - **Download**: Save as CSV or PDF with graphs!
         """)
 
