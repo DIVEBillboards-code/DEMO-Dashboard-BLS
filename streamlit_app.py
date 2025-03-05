@@ -385,20 +385,21 @@ if uploaded_file:
 
             with tab5:
                 st.subheader("Impact Analysis: Control vs Exposed Groups")
-                col1, col2 = st.columns(2)
 
+                # Graph 1: Box Plot for Consideration KPI
+                st.write("### Consideration KPI Distribution")
+                col1, col2 = st.columns(2)
                 with col1:
-                    # Box plot comparing Consideration between Control and Exposed groups
                     fig_box_impact = px.box(filtered_df, x='Group', y=kpi_col,
                                             title=f"{kpi_col} by Group",
                                             template="plotly_white", color='Group',
                                             color_discrete_sequence=["#ff5733", "#00cc96"])
                     fig_box_impact.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
                     st.plotly_chart(fig_box_impact, use_container_width=True, key="impact_box_chart")
-                    figures["Impact Box Plot"] = fig_box_impact
+                    figures["Impact Box Plot - Consideration"] = fig_box_impact
 
+                # Graph 2: Histogram for Consideration KPI
                 with col2:
-                    # Histogram of Consideration scores for both groups
                     fig_hist_impact = px.histogram(filtered_df, x=kpi_col, color='Group',
                                                   title=f"{kpi_col} Distribution by Group",
                                                   template="plotly_white",
@@ -407,7 +408,58 @@ if uploaded_file:
                     fig_hist_impact.update_layout(font=dict(size=12), barmode='overlay')
                     fig_hist_impact.update_traces(opacity=0.75)
                     st.plotly_chart(fig_hist_impact, use_container_width=True, key="impact_hist_chart")
-                    figures["Impact Histogram"] = fig_hist_impact
+                    figures["Impact Histogram - Consideration"] = fig_hist_impact
+
+                # Graph 3: Bar Chart for Brand Image
+                st.write("### Brand Image Perception")
+                brand_image_col = '[Brand image] Este es un anuncio de Coca Cola. ¿Qué imagen te da de Coca Cola?'
+                brand_image_counts = filtered_df.groupby(['Group', brand_image_col], observed=True).size().reset_index(name='Count')
+                fig_brand_image = px.bar(brand_image_counts, x=brand_image_col, y='Count', color='Group',
+                                        title=f"{brand_image_col} by Group",
+                                        template="plotly_white",
+                                        color_discrete_sequence=["#ff5733", "#00cc96"],
+                                        barmode='group')
+                fig_brand_image.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                st.plotly_chart(fig_brand_image, use_container_width=True, key="impact_brand_image_chart")
+                figures["Impact Bar Chart - Brand Image"] = fig_brand_image
+
+                # Graph 4: Stacked Bar Chart for Attribution
+                st.write("### Attribution of the Ad")
+                attribution_col = '[Attribution] Según tu opinión, este anuncio es para:'
+                attribution_counts = filtered_df.groupby(['Group', attribution_col], observed=True).size().reset_index(name='Count')
+                attribution_counts['Percentage'] = attribution_counts.groupby('Group')['Count'].transform(lambda x: x / x.sum() * 100)
+                fig_attribution = px.bar(attribution_counts, x='Group', y='Percentage', color=attribution_col,
+                                        title=f"{attribution_col} by Group (Percentage)",
+                                        template="plotly_white",
+                                        color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig_attribution.update_layout(font=dict(size=12))
+                st.plotly_chart(fig_attribution, use_container_width=True, key="impact_attribution_chart")
+                figures["Impact Stacked Bar Chart - Attribution"] = fig_attribution
+
+                # Graph 5: Box Plot for Interest
+                st.write("### Interest in the Ad")
+                interest_col = '[Interest] ¿Te interesa este anuncio?'
+                fig_interest = px.box(filtered_df, x='Group', y=interest_col,
+                                     title=f"{interest_col} by Group",
+                                     template="plotly_white", color='Group',
+                                     color_discrete_sequence=["#ff5733", "#00cc96"])
+                fig_interest.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                st.plotly_chart(fig_interest, use_container_width=True, key="impact_interest_chart")
+                figures["Impact Box Plot - Interest"] = fig_interest
+
+                # Graph 6: Line Chart for Consideration by Age Group
+                st.write("### Consideration by Age Group")
+                age_col = '[Profiling] ¿Qué edad tienes?'
+                age_order = ['18-24 años', '25-34 años', '35-44 años', '45-54 años', '55-64 años', '65 años o más']
+                filtered_df[age_col] = pd.Categorical(filtered_df[age_col], categories=age_order, ordered=True)
+                age_consideration = filtered_df.groupby(['Group', age_col], observed=True)[kpi_col].mean().reset_index()
+                fig_age_consideration = px.line(age_consideration, x=age_col, y=kpi_col, color='Group',
+                                               title=f"Average {kpi_col} by Age Group",
+                                               template="plotly_white",
+                                               color_discrete_sequence=["#ff5733", "#00cc96"])
+                fig_age_consideration.update_layout(xaxis=dict(tickangle=45), font=dict(size=12))
+                st.plotly_chart(fig_age_consideration, use_container_width=True, key="impact_age_consideration_chart")
+                figures["Impact Line Chart - Consideration by Age"] = fig_age_consideration
 
             st.subheader("Download Your Data")
             col1, col2 = st.columns(2)
@@ -434,7 +486,7 @@ else:
           - **Insights**: Comparisons and heatmaps.
           - **Explore**: Relationships and histograms.
           - **Profiles**: Radar charts for multi-variable analysis.
-          - **Impact Analysis**: Compare control vs exposed groups and view Impact Score.
+          - **Impact Analysis**: Multiple graphs comparing control vs exposed groups and Impact Score.
         - **Download**: Save as CSV or PDF with graphs!
         """)
 
