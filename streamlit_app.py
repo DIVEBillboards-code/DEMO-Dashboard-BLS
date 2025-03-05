@@ -6,7 +6,7 @@ from io import BytesIO
 from fpdf import FPDF
 import plotly.io as pio
 import os
-import numpy as np  # Added for numerical operations
+import numpy as np
 
 st.set_page_config(page_title="Excel Data Visualizer", layout="wide")
 
@@ -130,13 +130,12 @@ def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figure
     pdf.cell(0, 6, f"Columns: {filtered_df.shape[1]}", ln=True)
     pdf.cell(0, 6, f"Missing Values: {filtered_df.isna().sum().sum()}", ln=True)
 
-    # Column Types
+    # Group Breakdown
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, "Column Types", ln=True)
+    pdf.cell(0, 10, "Group Breakdown", ln=True)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 6, f"Numeric (Continuous): {', '.join(numeric_cols)}", ln=True)
-    pdf.cell(0, 6, f"Categorical (Unordered): {', '.join(categorical_cols)}", ln=True)
-    pdf.cell(0, 6, f"Ordinal (Survey-like): {', '.join(ordinal_cols)}", ln=True)
+    pdf.cell(0, 6, f"Control Group: {len(filtered_df[filtered_df['Group'] == 'Control'])} respondents", ln=True)
+    pdf.cell(0, 6, f"Exposed Group: {len(filtered_df[filtered_df['Group'] == 'Exposed'])} respondents", ln=True)
 
     # Impact Score
     pdf.set_font("Arial", "B", 12)
