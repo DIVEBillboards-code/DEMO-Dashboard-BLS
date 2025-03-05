@@ -88,16 +88,10 @@ def calculate_impact_score(df, ad_recall_col, kpi_col):
     exposed_df = df[df['Group'] == 'Exposed'].copy()
     exposed_df['Uplift'] = exposed_df[kpi_col] - control_avg
 
-    # Step 4: Calculate benchmarks (top 25% and bottom 10% of uplifts)
-    uplifts = exposed_df['Uplift'].dropna()
-    if uplifts.empty:
-        return None, "No data available for the exposed group."
-    
-    top_25_threshold = uplifts.quantile(0.75)
-    bottom_10_threshold = uplifts.quantile(0.10)
-    
-    x_i_top25 = uplifts[uplifts >= top_25_threshold].mean()  # Average of top 25%
-    x_i_flop10 = uplifts[uplifts <= bottom_10_threshold].mean()  # Average of bottom 10%
+    # Step 4: Use historical benchmarks for Consideration KPI
+    # These are placeholder values; replace with actual benchmarks if available
+    x_i_flop10 = -2  # Average uplift in the worst 10% of campaigns (e.g., -2 points on Consideration)
+    x_i_top25 = 3    # Average uplift in the top 25% of campaigns (e.g., +3 points on Consideration)
 
     # Avoid division by zero
     denominator = x_i_top25 - x_i_flop10
@@ -143,6 +137,7 @@ def create_pdf(filtered_df, numeric_cols, categorical_cols, ordinal_cols, figure
     pdf.set_font("Arial", "", 10)
     if impact_score is not None:
         pdf.cell(0, 6, f"Impact Score (IS): {impact_score:.2f}", ln=True)
+        pdf.cell(0, 6, "Note: IS calculated using placeholder benchmarks (flop10=-2, top25=3).", ln=True)
     else:
         pdf.cell(0, 6, f"Impact Score (IS): Not calculated ({impact_score_error})", ln=True)
 
@@ -232,6 +227,7 @@ if uploaded_file:
             st.subheader("Impact Score Analysis")
             if impact_score is not None:
                 st.metric("Impact Score (IS)", f"{impact_score:.2f}")
+                st.write("**Note**: IS calculated using placeholder benchmarks (flop10=-2, top25=3). Replace with actual benchmarks for accurate results.")
             else:
                 st.error(f"Could not calculate Impact Score: {impact_score_error}")
 
